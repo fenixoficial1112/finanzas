@@ -615,3 +615,51 @@ export async function guardarPlanDeudas(p: PlanDeudas) {
   if (!data.user) throw new Error('Sesión no válida')
   revisar(await supabase.from('perfiles').update(p).eq('id', data.user.id))
 }
+
+// ---------- Asesor IA ----------
+export interface Conversacion {
+  id: string
+  titulo: string
+  creado_en: string
+}
+
+export interface MensajeIA {
+  id: string
+  rol: 'user' | 'assistant'
+  contenido: string
+  creado_en: string
+}
+
+export async function listarConversaciones(): Promise<Conversacion[]> {
+  return revisar(
+    await supabase.from('conversaciones_ia').select('id,titulo,creado_en').order('creado_en', { ascending: false }).limit(50),
+  ) as Conversacion[]
+}
+
+export async function listarMensajesIA(conversacionId: string): Promise<MensajeIA[]> {
+  return revisar(
+    await supabase.from('mensajes_ia').select('id,rol,contenido,creado_en')
+      .eq('conversacion_id', conversacionId).order('creado_en'),
+  ) as MensajeIA[]
+}
+
+export async function borrarConversacion(id: string) {
+  revisar(await supabase.from('conversaciones_ia').delete().eq('id', id))
+}
+
+/** Envía la pregunta a la función segura "asesor" de Supabase, que llama a Claude. */
+export async function preguntarAsesor(conversacionId: string | null, mensaje: string, contexto: unknown) {
+  const { data, error } = await supabase.functions.invoke('asesor', {
+    body: { conversacion_id: conversacionId, mensaje, contexto },
+  })
+  if (error) {
+    // Si la función respondió con un error propio, mostramos su mensaje.
+    const respuesta = (error as { context?: Response }).context
+    if (respuesta && typeof respuesta.json === 'function') {
+      const cuerpo = await respuesta.json().catch(() => null)
+      if (cuerpo?.error) throw new Error(cuerpo.error)
+    }
+    throw new Error('No se pudo contactar al asesor. Revisa que la función "asesor" esté publicada en Supabase.')
+  }
+  return data as { conversacion_id: string; respuesta: string }
+}

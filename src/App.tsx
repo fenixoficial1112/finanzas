@@ -3,6 +3,7 @@ import { useAuth } from './auth/AuthProvider'
 import AppLayout from './layout/AppLayout'
 import { supabaseConfigurado } from './lib/supabase'
 import Ajustes from './pages/Ajustes'
+import Asesor from './pages/Asesor'
 import ConfigFaltante from './pages/ConfigFaltante'
 import Cuentas from './pages/Cuentas'
 import Deudas from './pages/Deudas'
@@ -41,7 +42,7 @@ function Rutas() {
           <Route path="jornadas" element={<Jornadas />} />
           <Route path="vehiculo" element={<Vehiculo />} />
           <Route path="deudas" element={<Deudas />} />
-          <Route path="asesor" element={<Proximamente titulo="Asesor IA" fase={6} />} />
+          <Route path="asesor" element={<Asesor />} />
           <Route path="presupuesto" element={<Proximamente titulo="Presupuesto" fase={7} />} />
           <Route path="metas" element={<Proximamente titulo="Metas" fase={8} />} />
           <Route path="inversiones" element={<Proximamente titulo="Inversiones" fase={9} />} />

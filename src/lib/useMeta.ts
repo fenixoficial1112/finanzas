@@ -6,27 +6,28 @@ import { useDatos } from './useDatos'
 export const DIAS_HISTORIAL = 30
 
 /** Carga todo lo necesario y calcula la meta diaria y el avance del mes. */
+export async function cargarMeta() {
+  const desde = haceDias(DIAS_HISTORIAL - 1)
+  const hoy = hoyISO()
+  const mes = rangoMes(mesActual())
+  const [obligaciones, prefs, plataformas, jornadas, porPlataforma, jornadasMes, deudas] = await Promise.all([
+    listarObligaciones(), obtenerPreferenciasMeta(), listarPlataformas(),
+    listarJornadas(desde, hoy), totalesPorPlataforma(desde, hoy), listarJornadas(mes.desde, mes.hasta), listarDeudas(),
+  ])
+  // Las cuotas de las deudas activas se suman solas a las obligaciones.
+  const cuotas = deudas.filter((d) => d.incluir_en_meta && !d.pagada && d.saldo_centavos > 0 && d.cuota_centavos > 0)
+  const totalMes =
+    obligaciones.filter((o) => o.activa).reduce((s, o) => s + o.monto_centavos, 0) +
+    cuotas.reduce((s, d) => s + d.cuota_centavos, 0)
+  const meta = calcularMeta(totalMes, prefs.dias_trabajo_semana, prefs.margen_pct, plataformas, { jornadas, porPlataforma })
+  const netoMes = jornadasMes.reduce((s, j) => s + j.neto_centavos, 0)
+  const netoHoy = jornadasMes.filter((j) => j.fecha === hoy).reduce((s, j) => s + j.neto_centavos, 0)
+  return {
+    obligaciones, cuotas, prefs, totalMes, meta, netoMes, netoHoy,
+    progreso: progresoMes(meta, netoMes, prefs.dias_trabajo_semana, new Date()),
+  }
+}
+
 export function useMeta() {
-  const r = useDatos(async () => {
-    const desde = haceDias(DIAS_HISTORIAL - 1)
-    const hoy = hoyISO()
-    const mes = rangoMes(mesActual())
-    const [obligaciones, prefs, plataformas, jornadas, porPlataforma, jornadasMes, deudas] = await Promise.all([
-      listarObligaciones(), obtenerPreferenciasMeta(), listarPlataformas(),
-      listarJornadas(desde, hoy), totalesPorPlataforma(desde, hoy), listarJornadas(mes.desde, mes.hasta), listarDeudas(),
-    ])
-    // Las cuotas de las deudas activas se suman solas a las obligaciones.
-    const cuotas = deudas.filter((d) => d.incluir_en_meta && !d.pagada && d.saldo_centavos > 0 && d.cuota_centavos > 0)
-    const totalMes =
-      obligaciones.filter((o) => o.activa).reduce((s, o) => s + o.monto_centavos, 0) +
-      cuotas.reduce((s, d) => s + d.cuota_centavos, 0)
-    const meta = calcularMeta(totalMes, prefs.dias_trabajo_semana, prefs.margen_pct, plataformas, { jornadas, porPlataforma })
-    const netoMes = jornadasMes.reduce((s, j) => s + j.neto_centavos, 0)
-    const netoHoy = jornadasMes.filter((j) => j.fecha === hoy).reduce((s, j) => s + j.neto_centavos, 0)
-    return {
-      obligaciones, cuotas, prefs, totalMes, meta, netoMes, netoHoy,
-      progreso: progresoMes(meta, netoMes, prefs.dias_trabajo_semana, new Date()),
-    }
-  }, [])
-  return r
+  return useDatos(cargarMeta, [])
 }
