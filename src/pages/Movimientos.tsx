@@ -131,7 +131,11 @@ export default function Movimientos() {
                           <p className="text-xs text-suave">→ {formatear(m.monto_destino_centavos, destino.moneda)}</p>
                         )}
                       </div>
-                      {m.pago_deuda_id ? (
+                      {m.aporte_meta_id ? (
+                        <Link to="/metas" className="text-sm font-semibold text-marca" title="Se edita desde Metas">
+                          Ver en Metas
+                        </Link>
+                      ) : m.pago_deuda_id ? (
                         <Link to="/deudas" className="text-sm font-semibold text-marca" title="Se edita desde Deudas">
                           Ver en Deudas
                         </Link>

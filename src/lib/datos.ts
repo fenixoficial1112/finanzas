@@ -38,9 +38,10 @@ export interface Movimiento {
   carga_id?: string | null
   mantenimiento_id?: string | null
   pago_deuda_id?: string | null
+  aporte_meta_id?: string | null
 }
 
-export type NuevoMovimiento = Omit<Movimiento, 'id' | 'jornada_id' | 'carga_id' | 'mantenimiento_id' | 'pago_deuda_id'>
+export type NuevoMovimiento = Omit<Movimiento, 'id' | 'jornada_id' | 'carga_id' | 'mantenimiento_id' | 'pago_deuda_id' | 'aporte_meta_id'>
 
 export const NOMBRES_TIPO_CUENTA: Record<TipoCuenta, string> = {
   efectivo: 'Efectivo',
@@ -109,7 +110,7 @@ export interface FiltroMovimientos {
 export async function listarMovimientos(f: FiltroMovimientos): Promise<Movimiento[]> {
   let q = supabase
     .from('movimientos')
-    .select('id,tipo,monto_centavos,cuenta_id,cuenta_destino_id,monto_destino_centavos,categoria_id,fecha,nota,jornada_id,carga_id,mantenimiento_id,pago_deuda_id')
+    .select('id,tipo,monto_centavos,cuenta_id,cuenta_destino_id,monto_destino_centavos,categoria_id,fecha,nota,jornada_id,carga_id,mantenimiento_id,pago_deuda_id,aporte_meta_id')
     .gte('fecha', f.desde)
     .lte('fecha', f.hasta)
     .order('fecha', { ascending: false })
@@ -705,4 +706,75 @@ export async function guardarUmbralAlerta(pct: number) {
   const { data } = await supabase.auth.getUser()
   if (!data.user) throw new Error('Sesión no válida')
   revisar(await supabase.from('perfiles').update({ umbral_alerta_pct: pct }).eq('id', data.user.id))
+}
+
+// ---------- Metas ----------
+export interface Meta {
+  id: string
+  nombre: string
+  monto_objetivo_centavos: number
+  moneda: Moneda
+  fecha_objetivo: string
+  cuenta_id: string | null
+  incluir_en_meta: boolean
+  estado: 'activa' | 'pausada' | 'lograda'
+  creado_en: string
+}
+
+export interface MetaConAhorro extends Meta {
+  ahorrado_centavos: number
+  ultimo_aporte: string | null
+}
+
+export interface AporteMeta {
+  id: string
+  meta_id: string
+  tipo: 'aporte' | 'retiro'
+  fecha: string
+  monto_centavos: number
+  cuenta_id: string | null
+  nota: string | null
+}
+
+export async function listarMetas(): Promise<MetaConAhorro[]> {
+  const [ms, est] = await Promise.all([
+    supabase.from('metas').select('id,nombre,monto_objetivo_centavos,moneda,fecha_objetivo,cuenta_id,incluir_en_meta,estado,creado_en').order('fecha_objetivo'),
+    supabase.from('metas_estado').select('meta_id,ahorrado_centavos,ultimo_aporte'),
+  ])
+  const estados = new Map((revisar(est) as { meta_id: string; ahorrado_centavos: number; ultimo_aporte: string | null }[]).map((e) => [e.meta_id, e]))
+  return (revisar(ms) as Meta[]).map((m) => ({
+    ...m,
+    monto_objetivo_centavos: Number(m.monto_objetivo_centavos),
+    ahorrado_centavos: Number(estados.get(m.id)?.ahorrado_centavos ?? 0),
+    ultimo_aporte: estados.get(m.id)?.ultimo_aporte ?? null,
+  }))
+}
+
+export async function guardarMeta(m: Omit<Meta, 'id' | 'estado' | 'creado_en'>, id?: string) {
+  if (id) revisar(await supabase.from('metas').update(m).eq('id', id))
+  else revisar(await supabase.from('metas').insert(m))
+}
+
+export async function cambiarEstadoMeta(id: string, estado: Meta['estado']) {
+  revisar(await supabase.from('metas').update({ estado }).eq('id', id))
+}
+
+export async function borrarMeta(id: string) {
+  revisar(await supabase.from('metas').delete().eq('id', id))
+}
+
+export async function listarAportes(metaId: string): Promise<AporteMeta[]> {
+  const filas = revisar(
+    await supabase.from('aportes_meta').select('id,meta_id,tipo,fecha,monto_centavos,cuenta_id,nota')
+      .eq('meta_id', metaId).order('fecha', { ascending: false }).order('creado_en', { ascending: false }),
+  ) as AporteMeta[]
+  return filas.map((a) => ({ ...a, monto_centavos: Number(a.monto_centavos) }))
+}
+
+export async function guardarAporte(a: Omit<AporteMeta, 'id'>) {
+  revisar(await supabase.from('aportes_meta').insert(a))
+}
+
+export async function borrarAporte(id: string) {
+  revisar(await supabase.from('aportes_meta').delete().eq('id', id))
 }

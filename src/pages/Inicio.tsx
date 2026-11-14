@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { Aviso, btnPrincipal, tarjeta } from '../components/ui'
-import { NOMBRES_DOCUMENTO, listarCategorias, listarCuentas, listarDeudas, listarPresupuestos, obtenerUmbralAlerta, listarMovimientos, obtenerDatosVehiculo, obtenerTasaUSD } from '../lib/datos'
+import { NOMBRES_DOCUMENTO, listarCategorias, listarMetas, listarCuentas, listarDeudas, listarPresupuestos, obtenerUmbralAlerta, listarMovimientos, obtenerDatosVehiculo, obtenerTasaUSD } from '../lib/datos'
 import { enPesos, formatear } from '../lib/dinero'
 import { fechaLarga, hoyISO, mesActual, nombreMes, rangoMes } from '../lib/fechas'
 import { resumir } from '../lib/resumen'
@@ -8,6 +8,7 @@ import { useDatos } from '../lib/useDatos'
 import { useMeta } from '../lib/useMeta'
 import { proximoPago } from '../lib/deudas'
 import { avance, gastoPorCategoria } from '../lib/presupuesto'
+import { estadoMeta, TEXTO_RITMO } from '../lib/metas'
 import { COLORES_ESTADO, estadoDocumento, estadoRecordatorio } from '../lib/vehiculo'
 
 const PASOS = [
@@ -29,6 +30,7 @@ export default function Inicio() {
   const escala = meta && meta.meta.netoDiario > 0 ? metaHoy / meta.meta.netoDiario : 1
 
   const deudas = useDatos(listarDeudas, [])
+  const metas = useDatos(listarMetas, [])
   const presupuesto = useDatos(async () => {
     const [ps, cats, umbral] = await Promise.all([listarPresupuestos(mes), listarCategorias(), obtenerUmbralAlerta()])
     return { ps, cats, umbral }
@@ -138,6 +140,30 @@ export default function Inicio() {
               <li key={a.clave} className={`text-sm font-semibold px-3 py-1.5 rounded-full ${COLORES_ESTADO[a.estado].etiqueta}`}>{a.texto}</li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {(metas.datos ?? []).some((m) => m.estado === 'activa') && (
+        <section className={`${tarjeta} p-5 space-y-4`}>
+          <div className="flex justify-between items-center">
+            <h2 className="font-semibold">Mis metas</h2>
+            <Link to="/metas" className="text-sm font-semibold text-marca">Ver todas</Link>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            {(metas.datos ?? []).filter((m) => m.estado === 'activa').slice(0, 3).map((m) => {
+              const e = estadoMeta(m.monto_objetivo_centavos, m.ahorrado_centavos, m.fecha_objetivo, m.creado_en)
+              return (
+                <div key={m.id} className="space-y-1.5">
+                  <div className="flex justify-between gap-2 text-sm">
+                    <span className="font-semibold truncate">{m.nombre}</span>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${TEXTO_RITMO[e.ritmo].clase}`}>{TEXTO_RITMO[e.ritmo].texto}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-gray-200"><div className="h-2 rounded-full bg-marca" style={{ width: `${Math.max(1, e.fraccion * 100)}%` }} /></div>
+                  <p className="text-xs text-suave">{formatear(m.ahorrado_centavos, m.moneda)} de {formatear(m.monto_objetivo_centavos, m.moneda)} · {Math.round(e.fraccion * 100)}%</p>
+                </div>
+              )
+            })}
+          </div>
         </section>
       )}
 

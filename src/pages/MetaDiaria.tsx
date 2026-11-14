@@ -17,7 +17,7 @@ export default function MetaDiaria() {
   if (datos.error) return <Aviso>{datos.error}</Aviso>
   if (datos.cargando || !datos.datos) return <p className="text-suave">Cargando…</p>
 
-  const { obligaciones: lista, cuotas, prefs: p, totalMes, meta, netoMes, netoHoy, progreso: prog } = datos.datos
+  const { obligaciones: lista, cuotas, aportesMetas, prefs: p, totalMes, meta, netoMes, netoHoy, progreso: prog } = datos.datos
 
   const recargarTodo = datos.recargar
 
@@ -108,7 +108,7 @@ export default function MetaDiaria() {
           {lista.some((o) => o.tipo === 'deuda') && cuotas.length > 0 && (
             <Aviso>Las cuotas de la sección Deudas ya se suman solas. Si una obligación de tipo "Deuda / préstamo" es la misma, quítala de aquí para no contarla dos veces.</Aviso>
           )}
-          {(lista.length > 0 || cuotas.length > 0) && (
+          {(lista.length > 0 || cuotas.length > 0 || aportesMetas.length > 0) && (
             <ul className="divide-y divide-borde border border-borde rounded-xl">
               {cuotas.map((d) => (
                 <li key={d.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 bg-gray-50/60">
@@ -117,6 +117,15 @@ export default function MetaDiaria() {
                     <p className="text-xs text-suave">Cuota de deuda · automático desde <Link to="/deudas" className="text-marca font-semibold">Deudas</Link></p>
                   </div>
                   <span className="font-semibold">{formatear(d.cuota_centavos)}</span>
+                </li>
+              ))}
+              {aportesMetas.map((m) => (
+                <li key={m.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 bg-gray-50/60">
+                  <div className="flex-1 min-w-40">
+                    <p className="font-semibold text-sm">{m.nombre}</p>
+                    <p className="text-xs text-suave">Aporte a meta · automático desde <Link to="/metas" className="text-marca font-semibold">Metas</Link></p>
+                  </div>
+                  <span className="font-semibold">{formatear(m.mensual)}</span>
                 </li>
               ))}
               {lista.map((o) => (

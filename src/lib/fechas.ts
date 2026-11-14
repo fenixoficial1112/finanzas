@@ -18,10 +18,13 @@ export function rangoMes(mes: string): { desde: string; hasta: string } {
   return { desde: `${mes}-01`, hasta: `${mes}-${dos(ultimo)}` }
 }
 
-/** "2026-11-14" → "sábado, 14 de noviembre" */
+/** "2026-11-14" → "sábado, 14 de noviembre" (con el año si no es el año en curso). */
 export function fechaLarga(iso: string): string {
   const [a, m, d] = iso.split('-').map(Number)
-  const t = new Date(a, m - 1, d).toLocaleDateString('es-DO', { weekday: 'long', day: 'numeric', month: 'long' })
+  const conAnio = a !== new Date().getFullYear()
+  const t = new Date(a, m - 1, d).toLocaleDateString('es-DO', {
+    weekday: 'long', day: 'numeric', month: 'long', ...(conAnio ? { year: 'numeric' } : {}),
+  })
   return t.charAt(0).toUpperCase() + t.slice(1)
 }
 

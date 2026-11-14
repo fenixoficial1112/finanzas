@@ -2,7 +2,7 @@
 // (con la misma lógica que usan las pantallas) para que la IA solo tenga que explicarlas.
 import {
   NOMBRES_DEUDA, NOMBRES_DOCUMENTO, NOMBRES_OBLIGACION, listarCategorias, listarCuentas, listarDeudas, listarJornadas,
-  listarMovimientos, listarPlataformas, listarPresupuestos, obtenerDatosVehiculo, obtenerUmbralAlerta, obtenerPlanDeudas, obtenerTasaUSD, totalesPorPlataforma,
+  listarMetas, listarMovimientos, listarPlataformas, listarPresupuestos, obtenerDatosVehiculo, obtenerUmbralAlerta, obtenerPlanDeudas, obtenerTasaUSD, totalesPorPlataforma,
   type CuentaConSaldo, type Movimiento,
 } from './datos'
 import { interesMensual, mesFuturo, simular, type DeudaSim, type ResultadoSim } from './deudas'
@@ -10,6 +10,7 @@ import { enPesos } from './dinero'
 import { diasDelMes, haceDias, hoyISO, mesActual, nombreMes, rangoMes } from './fechas'
 import { cargarMeta, DIAS_HISTORIAL } from './useMeta'
 import { avance, gastoPorCategoria } from './presupuesto'
+import { NOMBRES_PLAZO, estadoMeta } from './metas'
 import { estadoDocumento, estadoRecordatorio, rendimiento } from './vehiculo'
 
 /** Centavos → pesos redondeados (lo que lee la IA). */
@@ -61,12 +62,12 @@ export async function construirContexto() {
   const anterior = mesAnterior(mes)
   const desde30 = haceDias(DIAS_HISTORIAL - 1)
 
-  const [cuentas, tasa, categorias, movsMes, movsAnterior, jornadas, porApp, plataformas, deudas, planDeudas, meta, vehiculo, presupuestos, umbral] =
+  const [cuentas, tasa, categorias, movsMes, movsAnterior, jornadas, porApp, plataformas, deudas, planDeudas, meta, vehiculo, presupuestos, umbral, metas] =
     await Promise.all([
       listarCuentas(), obtenerTasaUSD(), listarCategorias(),
       listarMovimientos(rangoMes(mes)), listarMovimientos(rangoMes(anterior)),
       listarJornadas(desde30, hoy), totalesPorPlataforma(desde30, hoy), listarPlataformas(),
-      listarDeudas(), obtenerPlanDeudas(), cargarMeta(), obtenerDatosVehiculo(), listarPresupuestos(mes), obtenerUmbralAlerta(),
+      listarDeudas(), obtenerPlanDeudas(), cargarMeta(), obtenerDatosVehiculo(), listarPresupuestos(mes), obtenerUmbralAlerta(), listarMetas(),
     ])
   const nombresCat = new Map(categorias.map((c) => [c.id, c.nombre]))
 
@@ -101,7 +102,7 @@ export async function construirContexto() {
 
   return {
     fecha_hoy: hoy,
-    nota: 'Montos en pesos dominicanos (RD$) redondeados, salvo que se indique US$. Metas a plazo e inversiones todavía no se registran en la app.',
+    nota: 'Montos en pesos dominicanos (RD$) redondeados, salvo que se indique US$. Las inversiones todavía no se registran en la app.',
     cuentas: {
       lista: cuentas.map((c) => ({ nombre: c.nombre, tipo: c.tipo, moneda: c.moneda === 'USD' ? 'US$' : 'RD$', saldo: rd(c.saldo_centavos) })),
       tasa_dolar: tasa,
@@ -162,6 +163,14 @@ export async function construirContexto() {
       },
       neto_ganado_hoy: rd(meta.netoHoy),
     },
+    metas: metas.length === 0 ? 'No ha creado metas' : metas.map((m) => {
+      const e = estadoMeta(m.monto_objetivo_centavos, m.ahorrado_centavos, m.fecha_objetivo, m.creado_en)
+      return {
+        nombre: m.nombre, plazo: NOMBRES_PLAZO[e.plazo], moneda: m.moneda === 'USD' ? 'US$' : 'RD$', estado: m.estado,
+        objetivo: rd(m.monto_objetivo_centavos), ahorrado: rd(m.ahorrado_centavos), porcentaje: Math.round(e.fraccion * 100),
+        fecha_objetivo: m.fecha_objetivo, ritmo: e.ritmo, aporte_mensual_necesario: rd(e.aporteMensual), incluida_en_meta_diaria: m.incluir_en_meta,
+      }
+    }),
     deudas: activas.length === 0 ? { activas: 0 } : {
       total: rd(activas.reduce((s, d) => s + d.saldo_centavos, 0)),
       intereses_este_mes: rd(activas.reduce((s, d) => s + interesMensual(d.saldo_centavos, d.tasa_anual), 0)),
