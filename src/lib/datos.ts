@@ -34,9 +34,10 @@ export interface Movimiento {
   categoria_id: string | null
   fecha: string
   nota: string | null
+  jornada_id?: string | null
 }
 
-export type NuevoMovimiento = Omit<Movimiento, 'id'>
+export type NuevoMovimiento = Omit<Movimiento, 'id' | 'jornada_id'>
 
 export const NOMBRES_TIPO_CUENTA: Record<TipoCuenta, string> = {
   efectivo: 'Efectivo',
@@ -105,7 +106,7 @@ export interface FiltroMovimientos {
 export async function listarMovimientos(f: FiltroMovimientos): Promise<Movimiento[]> {
   let q = supabase
     .from('movimientos')
-    .select('id,tipo,monto_centavos,cuenta_id,cuenta_destino_id,monto_destino_centavos,categoria_id,fecha,nota')
+    .select('id,tipo,monto_centavos,cuenta_id,cuenta_destino_id,monto_destino_centavos,categoria_id,fecha,nota,jornada_id')
     .gte('fecha', f.desde)
     .lte('fecha', f.hasta)
     .order('fecha', { ascending: false })
@@ -148,4 +149,157 @@ export async function guardarTasaUSD(pesos: number) {
       actualizada_en: new Date().toISOString(),
     }),
   )
+}
+
+// ---------- Plataformas (InDrive, Uber, …) ----------
+export interface Plataforma {
+  id: string
+  nombre: string
+  comision_pct: number
+  activa: boolean
+}
+
+export async function listarPlataformas(): Promise<Plataforma[]> {
+  const filas = revisar(
+    await supabase.from('plataformas').select('id,nombre,comision_pct,activa').order('nombre'),
+  ) as Plataforma[]
+  return filas.map((p) => ({ ...p, comision_pct: Number(p.comision_pct) }))
+}
+
+export async function actualizarPlataforma(id: string, cambios: Partial<Pick<Plataforma, 'comision_pct' | 'activa'>>) {
+  revisar(await supabase.from('plataformas').update(cambios).eq('id', id))
+}
+
+export async function crearPlataforma(nombre: string, comision_pct: number) {
+  const limpio = nombre.trim()
+  let cat = revisar(
+    await supabase.from('categorias').select('id').eq('tipo', 'ingreso').eq('nombre', limpio).maybeSingle(),
+  ) as { id: string } | null
+  if (!cat) {
+    cat = revisar(
+      await supabase.from('categorias').insert({ nombre: limpio, tipo: 'ingreso' }).select('id').single(),
+    ) as { id: string }
+  }
+  revisar(await supabase.from('plataformas').insert({ nombre: limpio, comision_pct, categoria_id: cat.id }))
+}
+
+// ---------- Jornadas ----------
+export interface JornadaResumen {
+  id: string
+  fecha: string
+  minutos: number
+  km_inicial: number | null
+  km_final: number | null
+  km: number | null
+  nota: string | null
+  viajes: number
+  bruto_centavos: number
+  comision_centavos: number
+  gastos_centavos: number
+  neto_centavos: number
+}
+
+export interface JornadaPlataforma {
+  plataforma_id: string
+  viajes: number
+  efectivo_centavos: number
+  app_centavos: number
+  comision_centavos: number
+}
+
+export interface GastoJornada {
+  categoria_id: string | null
+  monto_centavos: number
+  cuenta_id: string
+  nota: string | null
+}
+
+export interface Jornada {
+  id?: string
+  fecha: string
+  minutos: number
+  km_inicial: number | null
+  km_final: number | null
+  cuenta_efectivo_id: string
+  cuenta_app_id: string | null
+  nota: string | null
+  plataformas: JornadaPlataforma[]
+  gastos: GastoJornada[]
+}
+
+const num = (v: unknown) => (v == null ? null : Number(v))
+
+export async function listarJornadas(desde: string, hasta: string): Promise<JornadaResumen[]> {
+  const filas = revisar(
+    await supabase.from('jornadas_resumen').select('*').gte('fecha', desde).lte('fecha', hasta)
+      .order('fecha', { ascending: false }),
+  ) as JornadaResumen[]
+  return filas.map((j) => ({
+    ...j,
+    km: num(j.km), km_inicial: num(j.km_inicial), km_final: num(j.km_final),
+    bruto_centavos: Number(j.bruto_centavos), comision_centavos: Number(j.comision_centavos),
+    gastos_centavos: Number(j.gastos_centavos), neto_centavos: Number(j.neto_centavos),
+  }))
+}
+
+/** Totales por plataforma en un rango de fechas (para comparar InDrive vs Uber). */
+export async function totalesPorPlataforma(desde: string, hasta: string) {
+  const filas = revisar(
+    await supabase
+      .from('jornada_plataformas')
+      .select('plataforma_id,viajes,efectivo_centavos,app_centavos,comision_centavos,jornadas!inner(fecha)')
+      .gte('jornadas.fecha', desde)
+      .lte('jornadas.fecha', hasta),
+  ) as JornadaPlataforma[]
+  const mapa = new Map<string, { viajes: number; bruto: number; comision: number; dias: number }>()
+  for (const f of filas) {
+    const t = mapa.get(f.plataforma_id) ?? { viajes: 0, bruto: 0, comision: 0, dias: 0 }
+    t.viajes += Number(f.viajes)
+    t.bruto += Number(f.efectivo_centavos) + Number(f.app_centavos)
+    t.comision += Number(f.comision_centavos)
+    t.dias += 1
+    mapa.set(f.plataforma_id, t)
+  }
+  return mapa
+}
+
+export async function obtenerJornada(id: string): Promise<Jornada> {
+  const j = revisar(
+    await supabase
+      .from('jornadas')
+      .select('id,fecha,minutos,km_inicial,km_final,cuenta_efectivo_id,cuenta_app_id,nota,jornada_plataformas(plataforma_id,viajes,efectivo_centavos,app_centavos,comision_centavos)')
+      .eq('id', id)
+      .single(),
+  ) as Omit<Jornada, 'plataformas' | 'gastos'> & { jornada_plataformas: JornadaPlataforma[] }
+  const gastos = revisar(
+    await supabase.from('movimientos').select('categoria_id,monto_centavos,cuenta_id,nota')
+      .eq('jornada_id', id).eq('origen', 'jornada_gasto'),
+  ) as GastoJornada[]
+  const { jornada_plataformas, ...resto } = j
+  return {
+    ...resto,
+    plataformas: jornada_plataformas.map((p) => ({
+      ...p,
+      efectivo_centavos: Number(p.efectivo_centavos),
+      app_centavos: Number(p.app_centavos),
+      comision_centavos: Number(p.comision_centavos),
+    })),
+    gastos: gastos.map((g) => ({ ...g, monto_centavos: Number(g.monto_centavos) })),
+  }
+}
+
+export async function guardarJornada(j: Jornada): Promise<string> {
+  return revisar(await supabase.rpc('guardar_jornada', { p: j })) as string
+}
+
+export async function borrarJornada(id: string) {
+  revisar(await supabase.from('jornadas').delete().eq('id', id))
+}
+
+/** Datos para prellenar una jornada nueva: último km final y cuentas usadas la última vez. */
+export async function ultimaJornada() {
+  return revisar(
+    await supabase.from('jornadas').select('km_final,cuenta_efectivo_id,cuenta_app_id')
+      .order('fecha', { ascending: false }).order('creado_en', { ascending: false }).limit(1).maybeSingle(),
+  ) as { km_final: number | null; cuenta_efectivo_id: string | null; cuenta_app_id: string | null } | null
 }

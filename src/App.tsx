@@ -6,6 +6,7 @@ import Ajustes from './pages/Ajustes'
 import ConfigFaltante from './pages/ConfigFaltante'
 import Cuentas from './pages/Cuentas'
 import Inicio from './pages/Inicio'
+import Jornadas from './pages/Jornadas'
 import Login from './pages/Login'
 import Movimientos from './pages/Movimientos'
 import NuevaContrasena from './pages/NuevaContrasena'
@@ -33,7 +34,7 @@ function Rutas() {
           <Route path="movimientos" element={<Movimientos />} />
           <Route path="cuentas" element={<Cuentas />} />
           <Route path="ajustes" element={<Ajustes />} />
-          <Route path="jornadas" element={<Proximamente titulo="Jornadas InDrive / Uber" fase={3} />} />
+          <Route path="jornadas" element={<Jornadas />} />
           <Route path="vehiculo" element={<Proximamente titulo="Vehículo" fase={4} />} />
           <Route path="deudas" element={<Proximamente titulo="Deudas" fase={5} />} />
           <Route path="asesor" element={<Proximamente titulo="Asesor IA" fase={6} />} />

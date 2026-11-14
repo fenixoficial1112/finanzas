@@ -26,11 +26,12 @@ export function Aviso({ tipo = 'error', children }: { tipo?: 'error' | 'ok'; chi
   )
 }
 
-export function Modal({ titulo, abierto, onCerrar, children }: {
+export function Modal({ titulo, abierto, onCerrar, children, ancho = false }: {
   titulo: string
   abierto: boolean
   onCerrar: () => void
   children: ReactNode
+  ancho?: boolean
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
@@ -44,7 +45,7 @@ export function Modal({ titulo, abierto, onCerrar, children }: {
     <dialog
       ref={ref}
       onClose={onCerrar}
-      className="m-auto w-[min(560px,calc(100vw-32px))] rounded-2xl p-0 backdrop:bg-black/40"
+      className={`m-auto ${ancho ? 'w-[min(1100px,calc(100vw-32px))]' : 'w-[min(560px,calc(100vw-32px))]'} rounded-2xl p-0 backdrop:bg-black/40`}
     >
       <div className="flex items-center justify-between border-b border-borde px-6 py-4">
         <h2 className="text-lg font-semibold">{titulo}</h2>
@@ -62,7 +63,7 @@ export function Encabezado({ titulo, subtitulo, children }: { titulo: string; su
         <h1 className="text-2xl md:text-3xl font-bold">{titulo}</h1>
         {subtitulo && <p className="text-sm text-suave mt-1">{subtitulo}</p>}
       </div>
-      {children && <div className="flex flex-wrap gap-2">{children}</div>}
+      {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
     </header>
   )
 }

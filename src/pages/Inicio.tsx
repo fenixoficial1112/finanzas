@@ -10,7 +10,7 @@ const PASOS = [
   { titulo: 'Crea tus cuentas', texto: 'Efectivo, banco y tu cuenta en dólares.', ruta: '/cuentas' },
   { titulo: 'Pon la tasa del dólar', texto: 'Para sumar tus US$ al total en pesos.', ruta: '/ajustes' },
   { titulo: 'Anota tus movimientos', texto: 'Lo que ganas y gastas cada día.', ruta: '/movimientos' },
-  { titulo: 'Registra tu vehículo', texto: 'Llega en la fase 4.', ruta: '/vehiculo' },
+  { titulo: 'Registra tu jornada', texto: 'Lo que ganaste hoy en InDrive y Uber.', ruta: '/jornadas' },
 ]
 
 export default function Inicio() {

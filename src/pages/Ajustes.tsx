@@ -1,6 +1,9 @@
 import { useState, type FormEvent } from 'react'
 import { Aviso, Campo, Encabezado, btnPrincipal, inputCls, tarjeta } from '../components/ui'
-import { borrarCategoria, crearCategoria, guardarTasaUSD, listarCategorias, obtenerTasaUSD, type Categoria } from '../lib/datos'
+import {
+  actualizarPlataforma, borrarCategoria, crearCategoria, crearPlataforma, guardarTasaUSD, listarCategorias, listarPlataformas,
+  obtenerTasaUSD, type Categoria, type Plataforma,
+} from '../lib/datos'
 import { useDatos } from '../lib/useDatos'
 
 export default function Ajustes() {
@@ -8,6 +11,7 @@ export default function Ajustes() {
     <div className="max-w-5xl space-y-6">
       <Encabezado titulo="Ajustes" />
       <TasaDolar />
+      <Plataformas />
       <Categorias />
     </div>
   )
@@ -125,5 +129,78 @@ function ListaCategorias({ tipo, categorias, onBorrar, onCrear }: {
         <button className={btnPrincipal}>Agregar</button>
       </form>
     </div>
+  )
+}
+
+function Plataformas() {
+  const plats = useDatos(listarPlataformas, [])
+  const [error, setError] = useState<string | null>(null)
+  const [nueva, setNueva] = useState('')
+
+  async function hacer(accion: () => Promise<void>) {
+    try {
+      await accion()
+      setError(null)
+      plats.recargar()
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e)
+      setError(m.includes('duplicate') ? 'Ya existe una app con ese nombre.' : m)
+    }
+  }
+
+  return (
+    <section className={`${tarjeta} p-6 space-y-4`}>
+      <div>
+        <h2 className="text-lg font-semibold">Apps de transporte</h2>
+        <p className="text-sm text-suave">
+          El % de comisión se usa para sugerir la comisión al registrar una jornada. Pon el que te cobra cada app; siempre puedes corregirlo en cada jornada.
+        </p>
+      </div>
+      {(error || plats.error) && <Aviso>{error ?? plats.error}</Aviso>}
+      <ul className="divide-y divide-borde border border-borde rounded-xl">
+        {(plats.datos ?? []).map((p) => (
+          <FilaPlataforma key={p.id} p={p} onGuardar={(c) => hacer(() => actualizarPlataforma(p.id, c))} />
+        ))}
+      </ul>
+      <form
+        className="flex gap-2 max-w-md"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (nueva.trim()) hacer(async () => { await crearPlataforma(nueva, 0); setNueva('') })
+        }}
+      >
+        <input aria-label="Nueva app" value={nueva} onChange={(e) => setNueva(e.target.value)} className={inputCls} placeholder="Otra app (ej.: Yango)" />
+        <button className={btnPrincipal}>Agregar</button>
+      </form>
+    </section>
+  )
+}
+
+function FilaPlataforma({ p, onGuardar }: { p: Plataforma; onGuardar: (c: Partial<Plataforma>) => void }) {
+  const [pct, setPct] = useState(String(p.comision_pct))
+  const cambiado = Number(pct) !== p.comision_pct
+  return (
+    <li className="flex flex-wrap items-center gap-3 px-4 py-3">
+      <span className={`font-semibold flex-1 min-w-32 ${p.activa ? '' : 'text-suave line-through'}`}>{p.nombre}</span>
+      <label className="flex items-center gap-2 text-sm">
+        Comisión
+        <input inputMode="decimal" value={pct} onChange={(e) => setPct(e.target.value)} className={`${inputCls} w-24`} aria-label={`Comisión de ${p.nombre} en %`} />
+        %
+      </label>
+      {cambiado && (
+        <button
+          className="text-sm font-semibold text-marca cursor-pointer"
+          onClick={() => {
+            const n = Number(pct.replace(',', '.'))
+            if (n >= 0 && n < 100) onGuardar({ comision_pct: n })
+          }}
+        >
+          Guardar
+        </button>
+      )}
+      <button className="text-sm text-suave hover:text-tinta cursor-pointer" onClick={() => onGuardar({ activa: !p.activa })}>
+        {p.activa ? 'Ocultar' : 'Mostrar'}
+      </button>
+    </li>
   )
 }

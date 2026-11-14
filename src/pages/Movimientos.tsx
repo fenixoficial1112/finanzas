@@ -131,10 +131,16 @@ export default function Movimientos() {
                           <p className="text-xs text-suave">→ {formatear(m.monto_destino_centavos, destino.moneda)}</p>
                         )}
                       </div>
-                      <div className="flex gap-3 text-sm">
-                        <button className="text-suave hover:text-tinta cursor-pointer" onClick={() => setEditando(m)}>Editar</button>
-                        <button className="text-suave hover:text-peligro cursor-pointer" onClick={() => borrar(m)}>Borrar</button>
-                      </div>
+                      {m.jornada_id ? (
+                        <Link to={`/jornadas?mes=${m.fecha.slice(0, 7)}`} className="text-sm font-semibold text-marca" title="Se edita desde Jornadas">
+                          Ver jornada
+                        </Link>
+                      ) : (
+                        <div className="flex gap-3 text-sm">
+                          <button className="text-suave hover:text-tinta cursor-pointer" onClick={() => setEditando(m)}>Editar</button>
+                          <button className="text-suave hover:text-peligro cursor-pointer" onClick={() => borrar(m)}>Borrar</button>
+                        </div>
+                      )}
                     </li>
                   )
                 })}
