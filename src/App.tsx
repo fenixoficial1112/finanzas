@@ -2,9 +2,12 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { useAuth } from './auth/AuthProvider'
 import AppLayout from './layout/AppLayout'
 import { supabaseConfigurado } from './lib/supabase'
+import Ajustes from './pages/Ajustes'
 import ConfigFaltante from './pages/ConfigFaltante'
+import Cuentas from './pages/Cuentas'
 import Inicio from './pages/Inicio'
 import Login from './pages/Login'
+import Movimientos from './pages/Movimientos'
 import NuevaContrasena from './pages/NuevaContrasena'
 import Proximamente from './pages/Proximamente'
 
@@ -27,7 +30,9 @@ function Rutas() {
       <Routes>
         <Route element={<AppLayout />}>
           <Route index element={<Inicio />} />
-          <Route path="movimientos" element={<Proximamente titulo="Movimientos" fase={2} />} />
+          <Route path="movimientos" element={<Movimientos />} />
+          <Route path="cuentas" element={<Cuentas />} />
+          <Route path="ajustes" element={<Ajustes />} />
           <Route path="jornadas" element={<Proximamente titulo="Jornadas InDrive / Uber" fase={3} />} />
           <Route path="vehiculo" element={<Proximamente titulo="Vehículo" fase={4} />} />
           <Route path="deudas" element={<Proximamente titulo="Deudas" fase={5} />} />

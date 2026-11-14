@@ -6,8 +6,8 @@ export default function ConfigFaltante() {
         <ol className="list-decimal pl-5 space-y-2 text-[15px] leading-relaxed">
           <li>Crea un proyecto gratis en <b>supabase.com</b>.</li>
           <li>
-            En el panel de Supabase abre <b>SQL Editor</b> y ejecuta el archivo{' '}
-            <code className="bg-gray-100 px-1 rounded">supabase/migrations/001_esquema_inicial.sql</code>.
+            En el panel de Supabase abre <b>SQL Editor</b> y ejecuta en orden los archivos de{' '}
+            <code className="bg-gray-100 px-1 rounded">supabase/migrations/</code>.
           </li>
           <li>
             Copia <code className="bg-gray-100 px-1 rounded">.env.example</code> como{' '}

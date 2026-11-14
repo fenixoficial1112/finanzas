@@ -10,8 +10,8 @@ Tecnología: React + Vite + TypeScript, Tailwind CSS y Supabase (login y base de
 
 1. Instala **Node.js 20 o superior** desde nodejs.org.
 2. Crea un proyecto gratis en **supabase.com**.
-3. En Supabase, abre **SQL Editor**, pega el contenido de
-   `supabase/migrations/001_esquema_inicial.sql` y ejecútalo.
+3. En Supabase, abre **SQL Editor** y ejecuta, **en orden**, cada archivo de
+   `supabase/migrations/` (`001_esquema_inicial.sql`, luego `002_saldos.sql`, …).
 4. En Supabase, ve a **Authentication → URL Configuration** y pon `http://localhost:5173`
    como *Site URL* (para que los enlaces del correo te devuelvan a la app).
 5. Copia `.env.example` como `.env.local` y pega la URL y la clave *anon* de tu proyecto
@@ -30,8 +30,8 @@ Tecnología: React + Vite + TypeScript, Tailwind CSS y Supabase (login y base de
 | # | Fase | Estado |
 |---|------|--------|
 | 1 | Proyecto base, login con correo, menú | ✅ |
-| 2 | Cuentas (RD$ / US$), categorías y movimientos | ⏳ |
-| 3 | Jornadas InDrive / Uber | |
+| 2 | Cuentas (RD$ / US$), categorías y movimientos | ✅ |
+| 3 | Jornadas InDrive / Uber | ⏳ |
 | 4 | Vehículo: combustible, mantenimiento, documentos | |
 | 5 | Deudas y simulador avalancha / bola de nieve | |
 | 6 | Asesor IA (Claude) | |

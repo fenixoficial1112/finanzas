@@ -6,6 +6,7 @@ import { Logo } from './Logo'
 const SECCIONES = [
   { ruta: '/', nombre: 'Inicio' },
   { ruta: '/movimientos', nombre: 'Movimientos' },
+  { ruta: '/cuentas', nombre: 'Cuentas' },
   { ruta: '/jornadas', nombre: 'Jornadas InDrive / Uber' },
   { ruta: '/vehiculo', nombre: 'Vehículo' },
   { ruta: '/presupuesto', nombre: 'Presupuesto' },
@@ -47,7 +48,10 @@ export default function AppLayout() {
           </NavLink>
         </div>
 
-        <div className="hidden md:flex mt-auto flex-col gap-2 border-t border-white/10 pt-4 px-2">
+        <div className="hidden md:block mt-auto border-t border-white/10 pt-3">
+          <NavLink to="/ajustes" className={linkCls}>Ajustes</NavLink>
+        </div>
+        <div className="hidden md:flex flex-col gap-2 pt-2 px-3">
           <span className="text-xs text-gray-400 truncate" title={session?.user.email}>
             {session?.user.email}
           </span>
