@@ -5,6 +5,7 @@ import { enPesos, formatear } from '../lib/dinero'
 import { fechaLarga, hoyISO, mesActual, nombreMes, rangoMes } from '../lib/fechas'
 import { resumir } from '../lib/resumen'
 import { useDatos } from '../lib/useDatos'
+import { useMeta } from '../lib/useMeta'
 import { COLORES_ESTADO, estadoDocumento, estadoRecordatorio } from '../lib/vehiculo'
 
 const PASOS = [
@@ -20,6 +21,10 @@ export default function Inicio() {
   const tasa = useDatos(obtenerTasaUSD, [])
   const movs = useDatos(() => listarMovimientos(rangoMes(mes)), [mes])
   const vehiculo = useDatos(obtenerDatosVehiculo, [])
+  const meta = useMeta().datos
+  // Meta de hoy: lo que falta repartido en los días que quedan (o la meta normal si ya se cubrió el mes).
+  const metaHoy = meta ? (meta.progreso.falta > 0 ? meta.progreso.netoDiarioRestante : meta.meta.netoDiario) : 0
+  const escala = meta && meta.meta.netoDiario > 0 ? metaHoy / meta.meta.netoDiario : 1
 
   const v = vehiculo.datos
   const alertas = v
@@ -59,6 +64,27 @@ export default function Inicio() {
           <Dato titulo="Ingresos del mes" valor={formatear(resumen.ingresos)} color="text-marca" />
           <Dato titulo="Gastos del mes" valor={formatear(resumen.gastos)} color="text-peligro" />
         </div>
+      )}
+
+      {meta && (
+        <Link to="/meta" className="block rounded-2xl bg-tinta text-white p-5 hover:bg-tinta/95">
+          {meta.totalMes > 0 ? (
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <p className="text-sm text-gray-300">Meta de hoy para ir al día con tus obligaciones</p>
+                <p className="text-3xl font-bold">{formatear(meta.netoHoy)} <span className="text-lg text-gray-300 font-semibold">de {formatear(metaHoy)} neto</span></p>
+              </div>
+              {meta.meta.plataformas[0]?.brutoDiario > 0 && (
+                <p className="text-sm text-gray-300">
+                  {meta.meta.plataformas.map((p) => `${p.plataforma.nombre}: facturar ${formatear(Math.round(p.brutoDiario * escala))}`).join(' · ')}
+                </p>
+              )}
+              <p className="text-sm text-gray-300">Mes: {Math.round(meta.progreso.avance * 100)}% cubierto →</p>
+            </div>
+          ) : (
+            <p className="font-semibold">¿Cuánto necesitas hacer por día? Anota tus obligaciones del mes y te lo calculo →</p>
+          )}
+        </Link>
       )}
 
       {alertas.length > 0 && (

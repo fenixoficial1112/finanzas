@@ -444,3 +444,58 @@ export const borrarRecordatorio = (id: string) => borrarDe('recordatorios', id)
 export const guardarDocumento = (vehiculoId: string, d: SinId<Documento>, id?: string) =>
   guardarEn('documentos', id ? d : { ...d, vehiculo_id: d.tipo === 'licencia' ? null : vehiculoId }, id)
 export const borrarDocumento = (id: string) => borrarDe('documentos', id)
+
+// ---------- Meta diaria ----------
+export type TipoObligacion = 'casa' | 'servicios' | 'comida' | 'deuda' | 'vehiculo' | 'familia' | 'ahorro' | 'otro'
+export const NOMBRES_OBLIGACION: Record<TipoObligacion, string> = {
+  casa: 'Casa / alquiler',
+  servicios: 'Luz, agua, internet, teléfono',
+  comida: 'Comida',
+  deuda: 'Deuda / préstamo',
+  vehiculo: 'Vehículo (cuota, seguro)',
+  familia: 'Familia / hijos',
+  ahorro: 'Ahorro',
+  otro: 'Otro',
+}
+
+export interface Obligacion {
+  id: string
+  nombre: string
+  tipo: TipoObligacion
+  monto_centavos: number
+  activa: boolean
+}
+
+export async function listarObligaciones(): Promise<Obligacion[]> {
+  const filas = revisar(
+    await supabase.from('obligaciones').select('id,nombre,tipo,monto_centavos,activa').order('creado_en'),
+  ) as Obligacion[]
+  return filas.map((o) => ({ ...o, monto_centavos: Number(o.monto_centavos) }))
+}
+
+export async function guardarObligacion(o: Omit<Obligacion, 'id' | 'activa'>, id?: string) {
+  if (id) revisar(await supabase.from('obligaciones').update(o).eq('id', id))
+  else revisar(await supabase.from('obligaciones').insert(o))
+}
+
+export async function borrarObligacion(id: string) {
+  revisar(await supabase.from('obligaciones').delete().eq('id', id))
+}
+
+export interface PreferenciasMeta {
+  dias_trabajo_semana: number
+  margen_pct: number
+}
+
+export async function obtenerPreferenciasMeta(): Promise<PreferenciasMeta> {
+  const p = revisar(
+    await supabase.from('perfiles').select('dias_trabajo_semana,margen_pct').maybeSingle(),
+  ) as PreferenciasMeta | null
+  return p ?? { dias_trabajo_semana: 6, margen_pct: 10 }
+}
+
+export async function guardarPreferenciasMeta(p: PreferenciasMeta) {
+  const { data } = await supabase.auth.getUser()
+  if (!data.user) throw new Error('Sesión no válida')
+  revisar(await supabase.from('perfiles').update(p).eq('id', data.user.id))
+}

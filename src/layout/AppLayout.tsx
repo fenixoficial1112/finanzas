@@ -5,6 +5,7 @@ import { Logo } from './Logo'
 
 const SECCIONES = [
   { ruta: '/', nombre: 'Inicio' },
+  { ruta: '/meta', nombre: 'Mi meta diaria' },
   { ruta: '/movimientos', nombre: 'Movimientos' },
   { ruta: '/cuentas', nombre: 'Cuentas' },
   { ruta: '/jornadas', nombre: 'Jornadas InDrive / Uber' },

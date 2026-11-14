@@ -30,3 +30,10 @@ export function nombreMes(mes: string): string {
   const [a, m] = mes.split('-').map(Number)
   return new Date(a, m - 1, 1).toLocaleDateString('es-DO', { month: 'long', year: 'numeric' })
 }
+
+/** Fecha de hace n días en hora local como "AAAA-MM-DD". */
+export function haceDias(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`
+}

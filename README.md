@@ -11,7 +11,7 @@ Tecnología: React + Vite + TypeScript, Tailwind CSS y Supabase (login y base de
 1. Instala **Node.js 20 o superior** desde nodejs.org.
 2. Crea un proyecto gratis en **supabase.com**.
 3. En Supabase, abre **SQL Editor** y ejecuta, **en orden**, cada archivo de
-   `supabase/migrations/` (`001_esquema_inicial.sql`, luego `002_saldos.sql`, `003_jornadas.sql`, `004_vehiculo.sql`, …).
+   `supabase/migrations/` (`001_esquema_inicial.sql`, luego `002_saldos.sql`, `003_jornadas.sql`, `004_vehiculo.sql`, `005_meta_diaria.sql`, …).
    Cuando lleguen fases nuevas, ejecuta solo los archivos nuevos.
 4. En Supabase, ve a **Authentication → URL Configuration** y pon `http://localhost:5173`
    como *Site URL* (para que los enlaces del correo te devuelvan a la app).
@@ -48,7 +48,8 @@ escritorio y en el menú Inicio, en su propia ventana):
 | 2 | Cuentas (RD$ / US$), categorías y movimientos | ✅ |
 | 3 | Jornadas InDrive / Uber · instalable en PC | ✅ |
 | 4 | Vehículo: combustible, mantenimiento, documentos | ✅ |
-| 5 | Deudas y simulador avalancha / bola de nieve | |
+| 4b | Mi meta diaria: cuánto producir al día para cubrir obligaciones | ✅ |
+| 5 | Deudas y simulador avalancha / bola de nieve | ⏳ |
 | 6 | Asesor IA (Claude) | |
 | 7 | Presupuesto y alertas | |
 | 8 | Metas corto / mediano / largo plazo | |

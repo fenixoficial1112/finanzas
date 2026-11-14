@@ -8,6 +8,7 @@ import Cuentas from './pages/Cuentas'
 import Inicio from './pages/Inicio'
 import Jornadas from './pages/Jornadas'
 import Login from './pages/Login'
+import MetaDiaria from './pages/MetaDiaria'
 import Movimientos from './pages/Movimientos'
 import NuevaContrasena from './pages/NuevaContrasena'
 import Proximamente from './pages/Proximamente'
@@ -32,6 +33,7 @@ function Rutas() {
       <Routes>
         <Route element={<AppLayout />}>
           <Route index element={<Inicio />} />
+          <Route path="meta" element={<MetaDiaria />} />
           <Route path="movimientos" element={<Movimientos />} />
           <Route path="cuentas" element={<Cuentas />} />
           <Route path="ajustes" element={<Ajustes />} />
