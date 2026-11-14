@@ -663,3 +663,46 @@ export async function preguntarAsesor(conversacionId: string | null, mensaje: st
   }
   return data as { conversacion_id: string; respuesta: string }
 }
+
+// ---------- Presupuesto ----------
+export interface Presupuesto {
+  id: string
+  mes: string
+  categoria_id: string
+  limite_centavos: number
+}
+
+export async function listarPresupuestos(mes: string): Promise<Presupuesto[]> {
+  const filas = revisar(
+    await supabase.from('presupuestos').select('id,mes,categoria_id,limite_centavos').eq('mes', mes),
+  ) as Presupuesto[]
+  return filas.map((p) => ({ ...p, limite_centavos: Number(p.limite_centavos) }))
+}
+
+/** Crea o actualiza los límites de un mes (una fila por categoría). */
+export async function guardarLimites(mes: string, limites: { categoria_id: string; limite_centavos: number }[]) {
+  if (!limites.length) return
+  const { data } = await supabase.auth.getUser()
+  if (!data.user) throw new Error('Sesión no válida')
+  revisar(
+    await supabase.from('presupuestos').upsert(
+      limites.map((l) => ({ ...l, mes, usuario_id: data.user!.id })),
+      { onConflict: 'usuario_id,mes,categoria_id' },
+    ),
+  )
+}
+
+export async function borrarPresupuesto(id: string) {
+  revisar(await supabase.from('presupuestos').delete().eq('id', id))
+}
+
+export async function obtenerUmbralAlerta(): Promise<number> {
+  const p = revisar(await supabase.from('perfiles').select('umbral_alerta_pct').maybeSingle()) as { umbral_alerta_pct: number } | null
+  return p?.umbral_alerta_pct ?? 80
+}
+
+export async function guardarUmbralAlerta(pct: number) {
+  const { data } = await supabase.auth.getUser()
+  if (!data.user) throw new Error('Sesión no válida')
+  revisar(await supabase.from('perfiles').update({ umbral_alerta_pct: pct }).eq('id', data.user.id))
+}

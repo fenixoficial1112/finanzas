@@ -1,12 +1,13 @@
 import { Link } from 'react-router-dom'
 import { Aviso, btnPrincipal, tarjeta } from '../components/ui'
-import { NOMBRES_DOCUMENTO, listarCuentas, listarDeudas, listarMovimientos, obtenerDatosVehiculo, obtenerTasaUSD } from '../lib/datos'
+import { NOMBRES_DOCUMENTO, listarCategorias, listarCuentas, listarDeudas, listarPresupuestos, obtenerUmbralAlerta, listarMovimientos, obtenerDatosVehiculo, obtenerTasaUSD } from '../lib/datos'
 import { enPesos, formatear } from '../lib/dinero'
 import { fechaLarga, hoyISO, mesActual, nombreMes, rangoMes } from '../lib/fechas'
 import { resumir } from '../lib/resumen'
 import { useDatos } from '../lib/useDatos'
 import { useMeta } from '../lib/useMeta'
 import { proximoPago } from '../lib/deudas'
+import { avance, gastoPorCategoria } from '../lib/presupuesto'
 import { COLORES_ESTADO, estadoDocumento, estadoRecordatorio } from '../lib/vehiculo'
 
 const PASOS = [
@@ -28,6 +29,10 @@ export default function Inicio() {
   const escala = meta && meta.meta.netoDiario > 0 ? metaHoy / meta.meta.netoDiario : 1
 
   const deudas = useDatos(listarDeudas, [])
+  const presupuesto = useDatos(async () => {
+    const [ps, cats, umbral] = await Promise.all([listarPresupuestos(mes), listarCategorias(), obtenerUmbralAlerta()])
+    return { ps, cats, umbral }
+  }, [mes])
   const hoy = new Date()
   const alertasDeudas = (deudas.datos ?? [])
     .filter((d) => !d.pagada && d.saldo_centavos > 0 && d.dia_pago)
@@ -54,7 +59,23 @@ export default function Inicio() {
           .map(({ d, e }) => ({ clave: d.id, estado: e.estado, texto: `${NOMBRES_DOCUMENTO[d.tipo]}: ${e.texto.toLowerCase()}` })),
       ]
     : []
-  const todasAlertas = [...alertasDeudas, ...alertas]
+  const alertasPresupuesto = (() => {
+    const p = presupuesto.datos
+    if (!p || !movs.datos || !cuentas.datos) return []
+    const { porCategoria } = gastoPorCategoria(movs.datos, cuentas.datos, tasa.datos ?? null)
+    const nombres = new Map(p.cats.map((c) => [c.id, c.nombre]))
+    return p.ps
+      .map((x) => ({ x, a: avance(porCategoria.get(x.categoria_id) ?? 0, x.limite_centavos, p.umbral, null, 30) }))
+      .filter(({ a }) => a.estado !== 'ok')
+      .map(({ x, a }) => ({
+        clave: x.id,
+        estado: (a.estado === 'excedido' ? 'vencido' : 'pronto') as 'vencido' | 'pronto',
+        texto: a.estado === 'excedido'
+          ? `${nombres.get(x.categoria_id)}: te pasaste del presupuesto por ${formatear(-a.restante)}`
+          : `${nombres.get(x.categoria_id)}: llevas el ${Math.round(a.fraccion * 100)}% del presupuesto`,
+      }))
+  })()
+  const todasAlertas = [...alertasDeudas, ...alertasPresupuesto, ...alertas]
 
   const lista = cuentas.datos ?? []
   const tasaUSD = tasa.datos ?? null

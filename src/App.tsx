@@ -13,6 +13,7 @@ import Login from './pages/Login'
 import MetaDiaria from './pages/MetaDiaria'
 import Movimientos from './pages/Movimientos'
 import NuevaContrasena from './pages/NuevaContrasena'
+import Presupuesto from './pages/Presupuesto'
 import Proximamente from './pages/Proximamente'
 import Vehiculo from './pages/Vehiculo'
 
@@ -43,7 +44,7 @@ function Rutas() {
           <Route path="vehiculo" element={<Vehiculo />} />
           <Route path="deudas" element={<Deudas />} />
           <Route path="asesor" element={<Asesor />} />
-          <Route path="presupuesto" element={<Proximamente titulo="Presupuesto" fase={7} />} />
+          <Route path="presupuesto" element={<Presupuesto />} />
           <Route path="metas" element={<Proximamente titulo="Metas" fase={8} />} />
           <Route path="inversiones" element={<Proximamente titulo="Inversiones" fase={9} />} />
           <Route path="reportes" element={<Proximamente titulo="Reportes" fase={10} />} />

@@ -2,13 +2,14 @@
 // (con la misma lógica que usan las pantallas) para que la IA solo tenga que explicarlas.
 import {
   NOMBRES_DEUDA, NOMBRES_DOCUMENTO, NOMBRES_OBLIGACION, listarCategorias, listarCuentas, listarDeudas, listarJornadas,
-  listarMovimientos, listarPlataformas, obtenerDatosVehiculo, obtenerPlanDeudas, obtenerTasaUSD, totalesPorPlataforma,
+  listarMovimientos, listarPlataformas, listarPresupuestos, obtenerDatosVehiculo, obtenerUmbralAlerta, obtenerPlanDeudas, obtenerTasaUSD, totalesPorPlataforma,
   type CuentaConSaldo, type Movimiento,
 } from './datos'
 import { interesMensual, mesFuturo, simular, type DeudaSim, type ResultadoSim } from './deudas'
 import { enPesos } from './dinero'
-import { haceDias, hoyISO, mesActual, nombreMes, rangoMes } from './fechas'
+import { diasDelMes, haceDias, hoyISO, mesActual, nombreMes, rangoMes } from './fechas'
 import { cargarMeta, DIAS_HISTORIAL } from './useMeta'
+import { avance, gastoPorCategoria } from './presupuesto'
 import { estadoDocumento, estadoRecordatorio, rendimiento } from './vehiculo'
 
 /** Centavos → pesos redondeados (lo que lee la IA). */
@@ -60,12 +61,12 @@ export async function construirContexto() {
   const anterior = mesAnterior(mes)
   const desde30 = haceDias(DIAS_HISTORIAL - 1)
 
-  const [cuentas, tasa, categorias, movsMes, movsAnterior, jornadas, porApp, plataformas, deudas, planDeudas, meta, vehiculo] =
+  const [cuentas, tasa, categorias, movsMes, movsAnterior, jornadas, porApp, plataformas, deudas, planDeudas, meta, vehiculo, presupuestos, umbral] =
     await Promise.all([
       listarCuentas(), obtenerTasaUSD(), listarCategorias(),
       listarMovimientos(rangoMes(mes)), listarMovimientos(rangoMes(anterior)),
       listarJornadas(desde30, hoy), totalesPorPlataforma(desde30, hoy), listarPlataformas(),
-      listarDeudas(), obtenerPlanDeudas(), cargarMeta(), obtenerDatosVehiculo(),
+      listarDeudas(), obtenerPlanDeudas(), cargarMeta(), obtenerDatosVehiculo(), listarPresupuestos(mes), obtenerUmbralAlerta(),
     ])
   const nombresCat = new Map(categorias.map((c) => [c.id, c.nombre]))
 
@@ -108,6 +109,17 @@ export async function construirContexto() {
     },
     mes_actual: { mes: nombreMes(mes), ...resumenMes(movsMes, cuentas, tasa, nombresCat) },
     mes_anterior: { mes: nombreMes(anterior), ...resumenMes(movsAnterior, cuentas, tasa, nombresCat) },
+    presupuesto_del_mes: presupuestos.length === 0 ? 'No ha creado presupuesto este mes' : (() => {
+      const { porCategoria } = gastoPorCategoria(movsMes, cuentas, tasa)
+      const dia = Number(hoy.slice(8, 10))
+      return presupuestos.map((p) => {
+        const a = avance(porCategoria.get(p.categoria_id) ?? 0, p.limite_centavos, umbral, dia, diasDelMes(mes))
+        return {
+          categoria: nombresCat.get(p.categoria_id) ?? 'Categoría', limite: rd(a.limite), gastado: rd(a.gastado),
+          porcentaje: Math.round(a.fraccion * 100), estado: a.estado, gasto_proyectado_fin_de_mes: a.proyeccion != null ? rd(a.proyeccion) : null,
+        }
+      })
+    })(),
     trabajo_conductor_ultimos_30_dias: {
       jornadas: jornadas.length,
       horas: Math.round(t.minutos / 6) / 10,

@@ -37,3 +37,16 @@ export function haceDias(n: number): string {
   d.setDate(d.getDate() - n)
   return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`
 }
+
+/** Suma (o resta) meses a "AAAA-MM". */
+export function moverMes(mes: string, delta: number): string {
+  const [a, m] = mes.split('-').map(Number)
+  const d = new Date(a, m - 1 + delta, 1)
+  return `${d.getFullYear()}-${dos(d.getMonth() + 1)}`
+}
+
+/** Días que tiene un mes "AAAA-MM". */
+export function diasDelMes(mes: string): number {
+  const [a, m] = mes.split('-').map(Number)
+  return new Date(a, m, 0).getDate()
+}
