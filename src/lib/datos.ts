@@ -37,9 +37,10 @@ export interface Movimiento {
   jornada_id?: string | null
   carga_id?: string | null
   mantenimiento_id?: string | null
+  pago_deuda_id?: string | null
 }
 
-export type NuevoMovimiento = Omit<Movimiento, 'id' | 'jornada_id' | 'carga_id' | 'mantenimiento_id'>
+export type NuevoMovimiento = Omit<Movimiento, 'id' | 'jornada_id' | 'carga_id' | 'mantenimiento_id' | 'pago_deuda_id'>
 
 export const NOMBRES_TIPO_CUENTA: Record<TipoCuenta, string> = {
   efectivo: 'Efectivo',
@@ -108,7 +109,7 @@ export interface FiltroMovimientos {
 export async function listarMovimientos(f: FiltroMovimientos): Promise<Movimiento[]> {
   let q = supabase
     .from('movimientos')
-    .select('id,tipo,monto_centavos,cuenta_id,cuenta_destino_id,monto_destino_centavos,categoria_id,fecha,nota,jornada_id,carga_id,mantenimiento_id')
+    .select('id,tipo,monto_centavos,cuenta_id,cuenta_destino_id,monto_destino_centavos,categoria_id,fecha,nota,jornada_id,carga_id,mantenimiento_id,pago_deuda_id')
     .gte('fecha', f.desde)
     .lte('fecha', f.hasta)
     .order('fecha', { ascending: false })
@@ -495,6 +496,121 @@ export async function obtenerPreferenciasMeta(): Promise<PreferenciasMeta> {
 }
 
 export async function guardarPreferenciasMeta(p: PreferenciasMeta) {
+  const { data } = await supabase.auth.getUser()
+  if (!data.user) throw new Error('Sesión no válida')
+  revisar(await supabase.from('perfiles').update(p).eq('id', data.user.id))
+}
+
+// ---------- Deudas ----------
+export type TipoDeuda = 'tarjeta' | 'prestamo_personal' | 'prestamo_vehiculo' | 'prestamista' | 'familiar' | 'tienda' | 'otro'
+export const NOMBRES_DEUDA: Record<TipoDeuda, string> = {
+  tarjeta: 'Tarjeta de crédito',
+  prestamo_personal: 'Préstamo personal',
+  prestamo_vehiculo: 'Préstamo del vehículo',
+  prestamista: 'Prestamista',
+  familiar: 'Familiar / amigo',
+  tienda: 'Tienda / financiamiento',
+  otro: 'Otro',
+}
+
+export interface Deuda {
+  id: string
+  nombre: string
+  tipo: TipoDeuda
+  acreedor: string | null
+  saldo_inicial_centavos: number
+  tasa_anual: number
+  cuota_centavos: number
+  dia_pago: number | null
+  incluir_en_meta: boolean
+  pagada: boolean
+}
+
+export interface DeudaConEstado extends Deuda {
+  saldo_centavos: number
+  pagado_centavos: number
+  intereses_pagados_centavos: number
+  cargos_centavos: number
+  ultimo_pago: string | null
+}
+
+export interface PagoDeuda {
+  id: string
+  deuda_id: string
+  tipo: 'pago' | 'cargo'
+  fecha: string
+  monto_centavos: number
+  interes_centavos: number
+  cuenta_id: string | null
+  nota: string | null
+}
+
+export async function listarDeudas(): Promise<DeudaConEstado[]> {
+  const [ds, est] = await Promise.all([
+    supabase.from('deudas').select('id,nombre,tipo,acreedor,saldo_inicial_centavos,tasa_anual,cuota_centavos,dia_pago,incluir_en_meta,pagada').order('creado_en'),
+    supabase.from('deudas_estado').select('*'),
+  ])
+  const estados = new Map((revisar(est) as Record<string, unknown>[]).map((e) => [e.deuda_id as string, e]))
+  return (revisar(ds) as Deuda[]).map((d) => {
+    const e = estados.get(d.id) ?? {}
+    return {
+      ...d,
+      saldo_inicial_centavos: Number(d.saldo_inicial_centavos),
+      tasa_anual: Number(d.tasa_anual),
+      cuota_centavos: Number(d.cuota_centavos),
+      saldo_centavos: Number(e.saldo_centavos ?? d.saldo_inicial_centavos),
+      pagado_centavos: Number(e.pagado_centavos ?? 0),
+      intereses_pagados_centavos: Number(e.intereses_pagados_centavos ?? 0),
+      cargos_centavos: Number(e.cargos_centavos ?? 0),
+      ultimo_pago: (e.ultimo_pago as string | null) ?? null,
+    }
+  })
+}
+
+export async function guardarDeuda(d: Omit<Deuda, 'id' | 'pagada'>, id?: string) {
+  if (id) revisar(await supabase.from('deudas').update(d).eq('id', id))
+  else revisar(await supabase.from('deudas').insert(d))
+}
+
+export async function marcarDeudaPagada(id: string, pagada: boolean) {
+  revisar(await supabase.from('deudas').update({ pagada }).eq('id', id))
+}
+
+export async function borrarDeuda(id: string) {
+  revisar(await supabase.from('deudas').delete().eq('id', id))
+}
+
+export async function listarPagosDeuda(deudaId: string): Promise<PagoDeuda[]> {
+  const filas = revisar(
+    await supabase.from('pagos_deuda').select('id,deuda_id,tipo,fecha,monto_centavos,interes_centavos,cuenta_id,nota')
+      .eq('deuda_id', deudaId).order('fecha', { ascending: false }).order('creado_en', { ascending: false }),
+  ) as PagoDeuda[]
+  return filas.map((p) => ({ ...p, monto_centavos: Number(p.monto_centavos), interes_centavos: Number(p.interes_centavos) }))
+}
+
+export async function guardarPagoDeuda(p: Omit<PagoDeuda, 'id'>) {
+  revisar(await supabase.from('pagos_deuda').insert(p))
+}
+
+export async function borrarPagoDeuda(id: string) {
+  revisar(await supabase.from('pagos_deuda').delete().eq('id', id))
+}
+
+export interface PlanDeudas {
+  estrategia_deudas: 'avalancha' | 'bola_nieve'
+  pago_extra_deudas_centavos: number
+}
+
+export async function obtenerPlanDeudas(): Promise<PlanDeudas> {
+  const p = revisar(
+    await supabase.from('perfiles').select('estrategia_deudas,pago_extra_deudas_centavos').maybeSingle(),
+  ) as PlanDeudas | null
+  return p
+    ? { ...p, pago_extra_deudas_centavos: Number(p.pago_extra_deudas_centavos) }
+    : { estrategia_deudas: 'avalancha', pago_extra_deudas_centavos: 0 }
+}
+
+export async function guardarPlanDeudas(p: PlanDeudas) {
   const { data } = await supabase.auth.getUser()
   if (!data.user) throw new Error('Sesión no válida')
   revisar(await supabase.from('perfiles').update(p).eq('id', data.user.id))

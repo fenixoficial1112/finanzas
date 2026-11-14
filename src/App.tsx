@@ -5,6 +5,7 @@ import { supabaseConfigurado } from './lib/supabase'
 import Ajustes from './pages/Ajustes'
 import ConfigFaltante from './pages/ConfigFaltante'
 import Cuentas from './pages/Cuentas'
+import Deudas from './pages/Deudas'
 import Inicio from './pages/Inicio'
 import Jornadas from './pages/Jornadas'
 import Login from './pages/Login'
@@ -39,7 +40,7 @@ function Rutas() {
           <Route path="ajustes" element={<Ajustes />} />
           <Route path="jornadas" element={<Jornadas />} />
           <Route path="vehiculo" element={<Vehiculo />} />
-          <Route path="deudas" element={<Proximamente titulo="Deudas" fase={5} />} />
+          <Route path="deudas" element={<Deudas />} />
           <Route path="asesor" element={<Proximamente titulo="Asesor IA" fase={6} />} />
           <Route path="presupuesto" element={<Proximamente titulo="Presupuesto" fase={7} />} />
           <Route path="metas" element={<Proximamente titulo="Metas" fase={8} />} />

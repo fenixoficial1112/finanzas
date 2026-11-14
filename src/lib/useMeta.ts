@@ -1,4 +1,4 @@
-import { listarJornadas, listarObligaciones, listarPlataformas, obtenerPreferenciasMeta, totalesPorPlataforma } from './datos'
+import { listarDeudas, listarJornadas, listarObligaciones, listarPlataformas, obtenerPreferenciasMeta, totalesPorPlataforma } from './datos'
 import { haceDias, hoyISO, mesActual, rangoMes } from './fechas'
 import { calcularMeta, progresoMes } from './meta'
 import { useDatos } from './useDatos'
@@ -11,16 +11,20 @@ export function useMeta() {
     const desde = haceDias(DIAS_HISTORIAL - 1)
     const hoy = hoyISO()
     const mes = rangoMes(mesActual())
-    const [obligaciones, prefs, plataformas, jornadas, porPlataforma, jornadasMes] = await Promise.all([
+    const [obligaciones, prefs, plataformas, jornadas, porPlataforma, jornadasMes, deudas] = await Promise.all([
       listarObligaciones(), obtenerPreferenciasMeta(), listarPlataformas(),
-      listarJornadas(desde, hoy), totalesPorPlataforma(desde, hoy), listarJornadas(mes.desde, mes.hasta),
+      listarJornadas(desde, hoy), totalesPorPlataforma(desde, hoy), listarJornadas(mes.desde, mes.hasta), listarDeudas(),
     ])
-    const totalMes = obligaciones.filter((o) => o.activa).reduce((s, o) => s + o.monto_centavos, 0)
+    // Las cuotas de las deudas activas se suman solas a las obligaciones.
+    const cuotas = deudas.filter((d) => d.incluir_en_meta && !d.pagada && d.saldo_centavos > 0 && d.cuota_centavos > 0)
+    const totalMes =
+      obligaciones.filter((o) => o.activa).reduce((s, o) => s + o.monto_centavos, 0) +
+      cuotas.reduce((s, d) => s + d.cuota_centavos, 0)
     const meta = calcularMeta(totalMes, prefs.dias_trabajo_semana, prefs.margen_pct, plataformas, { jornadas, porPlataforma })
     const netoMes = jornadasMes.reduce((s, j) => s + j.neto_centavos, 0)
     const netoHoy = jornadasMes.filter((j) => j.fecha === hoy).reduce((s, j) => s + j.neto_centavos, 0)
     return {
-      obligaciones, prefs, totalMes, meta, netoMes, netoHoy,
+      obligaciones, cuotas, prefs, totalMes, meta, netoMes, netoHoy,
       progreso: progresoMes(meta, netoMes, prefs.dias_trabajo_semana, new Date()),
     }
   }, [])

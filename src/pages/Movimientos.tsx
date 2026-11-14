@@ -131,7 +131,11 @@ export default function Movimientos() {
                           <p className="text-xs text-suave">→ {formatear(m.monto_destino_centavos, destino.moneda)}</p>
                         )}
                       </div>
-                      {m.carga_id || m.mantenimiento_id ? (
+                      {m.pago_deuda_id ? (
+                        <Link to="/deudas" className="text-sm font-semibold text-marca" title="Se edita desde Deudas">
+                          Ver en Deudas
+                        </Link>
+                      ) : m.carga_id || m.mantenimiento_id ? (
                         <Link to="/vehiculo" className="text-sm font-semibold text-marca" title="Se edita desde Vehículo">
                           Ver en Vehículo
                         </Link>

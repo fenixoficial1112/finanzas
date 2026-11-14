@@ -1,11 +1,12 @@
 import { Link } from 'react-router-dom'
 import { Aviso, btnPrincipal, tarjeta } from '../components/ui'
-import { NOMBRES_DOCUMENTO, listarCuentas, listarMovimientos, obtenerDatosVehiculo, obtenerTasaUSD } from '../lib/datos'
+import { NOMBRES_DOCUMENTO, listarCuentas, listarDeudas, listarMovimientos, obtenerDatosVehiculo, obtenerTasaUSD } from '../lib/datos'
 import { enPesos, formatear } from '../lib/dinero'
 import { fechaLarga, hoyISO, mesActual, nombreMes, rangoMes } from '../lib/fechas'
 import { resumir } from '../lib/resumen'
 import { useDatos } from '../lib/useDatos'
 import { useMeta } from '../lib/useMeta'
+import { proximoPago } from '../lib/deudas'
 import { COLORES_ESTADO, estadoDocumento, estadoRecordatorio } from '../lib/vehiculo'
 
 const PASOS = [
@@ -26,6 +27,24 @@ export default function Inicio() {
   const metaHoy = meta ? (meta.progreso.falta > 0 ? meta.progreso.netoDiarioRestante : meta.meta.netoDiario) : 0
   const escala = meta && meta.meta.netoDiario > 0 ? metaHoy / meta.meta.netoDiario : 1
 
+  const deudas = useDatos(listarDeudas, [])
+  const hoy = new Date()
+  const alertasDeudas = (deudas.datos ?? [])
+    .filter((d) => !d.pagada && d.saldo_centavos > 0 && d.dia_pago)
+    .map((d) => {
+      const prox = proximoPago(d.dia_pago!, hoy)
+      const dias = Math.round((prox.getTime() - new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()).getTime()) / 86_400_000)
+      // ¿Ya pagó en los últimos 20 días? Entonces no avisamos.
+      const pagoReciente = d.ultimo_pago && (hoy.getTime() - new Date(d.ultimo_pago + 'T12:00:00').getTime()) / 86_400_000 < 20
+      return { d, dias, pagoReciente }
+    })
+    .filter(({ dias, pagoReciente }) => dias <= 5 && !pagoReciente)
+    .map(({ d, dias }) => ({
+      clave: d.id,
+      estado: (dias <= 1 ? 'vencido' : 'pronto') as 'vencido' | 'pronto',
+      texto: `Pago ${d.nombre}: ${dias === 0 ? 'hoy' : dias === 1 ? 'mañana' : `en ${dias} días`}${d.cuota_centavos ? ` (${formatear(d.cuota_centavos)})` : ''}`,
+    }))
+
   const v = vehiculo.datos
   const alertas = v
     ? [
@@ -35,6 +54,7 @@ export default function Inicio() {
           .map(({ d, e }) => ({ clave: d.id, estado: e.estado, texto: `${NOMBRES_DOCUMENTO[d.tipo]}: ${e.texto.toLowerCase()}` })),
       ]
     : []
+  const todasAlertas = [...alertasDeudas, ...alertas]
 
   const lista = cuentas.datos ?? []
   const tasaUSD = tasa.datos ?? null
@@ -87,14 +107,13 @@ export default function Inicio() {
         </Link>
       )}
 
-      {alertas.length > 0 && (
+      {todasAlertas.length > 0 && (
         <section className={`${tarjeta} p-5 space-y-3`}>
           <div className="flex justify-between items-center">
-            <h2 className="font-semibold">Alertas del vehículo</h2>
-            <Link to="/vehiculo" className="text-sm font-semibold text-marca">Ver vehículo</Link>
+            <h2 className="font-semibold">Alertas</h2>
           </div>
           <ul className="flex flex-wrap gap-2">
-            {alertas.map((a) => (
+            {todasAlertas.map((a) => (
               <li key={a.clave} className={`text-sm font-semibold px-3 py-1.5 rounded-full ${COLORES_ESTADO[a.estado].etiqueta}`}>{a.texto}</li>
             ))}
           </ul>
