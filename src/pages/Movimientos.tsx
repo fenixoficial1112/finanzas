@@ -131,7 +131,11 @@ export default function Movimientos() {
                           <p className="text-xs text-suave">→ {formatear(m.monto_destino_centavos, destino.moneda)}</p>
                         )}
                       </div>
-                      {m.jornada_id ? (
+                      {m.carga_id || m.mantenimiento_id ? (
+                        <Link to="/vehiculo" className="text-sm font-semibold text-marca" title="Se edita desde Vehículo">
+                          Ver en Vehículo
+                        </Link>
+                      ) : m.jornada_id ? (
                         <Link to={`/jornadas?mes=${m.fecha.slice(0, 7)}`} className="text-sm font-semibold text-marca" title="Se edita desde Jornadas">
                           Ver jornada
                         </Link>

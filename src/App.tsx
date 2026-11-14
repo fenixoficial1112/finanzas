@@ -11,6 +11,7 @@ import Login from './pages/Login'
 import Movimientos from './pages/Movimientos'
 import NuevaContrasena from './pages/NuevaContrasena'
 import Proximamente from './pages/Proximamente'
+import Vehiculo from './pages/Vehiculo'
 
 export default function App() {
   if (!supabaseConfigurado) return <ConfigFaltante />
@@ -35,7 +36,7 @@ function Rutas() {
           <Route path="cuentas" element={<Cuentas />} />
           <Route path="ajustes" element={<Ajustes />} />
           <Route path="jornadas" element={<Jornadas />} />
-          <Route path="vehiculo" element={<Proximamente titulo="Vehículo" fase={4} />} />
+          <Route path="vehiculo" element={<Vehiculo />} />
           <Route path="deudas" element={<Proximamente titulo="Deudas" fase={5} />} />
           <Route path="asesor" element={<Proximamente titulo="Asesor IA" fase={6} />} />
           <Route path="presupuesto" element={<Proximamente titulo="Presupuesto" fase={7} />} />

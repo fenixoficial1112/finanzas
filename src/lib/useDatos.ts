@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 export function useDatos<T>(cargar: () => Promise<T>, deps: unknown[]) {
   const [datos, setDatos] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [cargado, setCargado] = useState(false)
   const [version, setVersion] = useState(0)
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -16,14 +17,20 @@ export function useDatos<T>(cargar: () => Promise<T>, deps: unknown[]) {
         if (vigente) {
           setDatos(d)
           setError(null)
+          setCargado(true)
         }
       })
-      .catch((e: unknown) => vigente && setError(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => {
+        if (vigente) {
+          setError(e instanceof Error ? e.message : String(e))
+          setCargado(true)
+        }
+      })
     return () => {
       vigente = false
     }
   }, [cargarMemo, version])
 
   const recargar = useCallback(() => setVersion((v) => v + 1), [])
-  return { datos, error, cargando: datos === null && error === null, recargar }
+  return { datos, error, cargando: !cargado, recargar }
 }

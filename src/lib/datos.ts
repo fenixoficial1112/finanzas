@@ -35,9 +35,11 @@ export interface Movimiento {
   fecha: string
   nota: string | null
   jornada_id?: string | null
+  carga_id?: string | null
+  mantenimiento_id?: string | null
 }
 
-export type NuevoMovimiento = Omit<Movimiento, 'id' | 'jornada_id'>
+export type NuevoMovimiento = Omit<Movimiento, 'id' | 'jornada_id' | 'carga_id' | 'mantenimiento_id'>
 
 export const NOMBRES_TIPO_CUENTA: Record<TipoCuenta, string> = {
   efectivo: 'Efectivo',
@@ -106,7 +108,7 @@ export interface FiltroMovimientos {
 export async function listarMovimientos(f: FiltroMovimientos): Promise<Movimiento[]> {
   let q = supabase
     .from('movimientos')
-    .select('id,tipo,monto_centavos,cuenta_id,cuenta_destino_id,monto_destino_centavos,categoria_id,fecha,nota,jornada_id')
+    .select('id,tipo,monto_centavos,cuenta_id,cuenta_destino_id,monto_destino_centavos,categoria_id,fecha,nota,jornada_id,carga_id,mantenimiento_id')
     .gte('fecha', f.desde)
     .lte('fecha', f.hasta)
     .order('fecha', { ascending: false })
@@ -303,3 +305,142 @@ export async function ultimaJornada() {
       .order('fecha', { ascending: false }).order('creado_en', { ascending: false }).limit(1).maybeSingle(),
   ) as { km_final: number | null; cuenta_efectivo_id: string | null; cuenta_app_id: string | null } | null
 }
+
+// ---------- Vehículo ----------
+export type TipoCombustible = 'gasolina_regular' | 'gasolina_premium' | 'gasoil' | 'glp' | 'electrico' | 'hibrido'
+export const NOMBRES_COMBUSTIBLE: Record<TipoCombustible, string> = {
+  gasolina_regular: 'Gasolina regular',
+  gasolina_premium: 'Gasolina premium',
+  gasoil: 'Gasoil',
+  glp: 'GLP (gas)',
+  electrico: 'Eléctrico',
+  hibrido: 'Híbrido',
+}
+
+export interface Vehiculo {
+  id: string
+  marca: string
+  modelo: string
+  anio: number | null
+  placa: string | null
+  km_registro: number
+  combustible: TipoCombustible
+}
+
+export interface CargaCombustible {
+  id: string
+  fecha: string
+  galones: number
+  total_centavos: number
+  km: number | null
+  tanque_lleno: boolean
+  cuenta_id: string | null
+  nota: string | null
+}
+
+export interface Mantenimiento {
+  id: string
+  tipo: string
+  fecha: string
+  km: number | null
+  costo_centavos: number
+  cuenta_id: string | null
+  taller: string | null
+  nota: string | null
+}
+
+export interface Recordatorio {
+  id: string
+  tipo: string
+  cada_km: number | null
+  cada_meses: number | null
+  ultimo_km: number | null
+  ultima_fecha: string | null
+}
+
+export type TipoDocumento = 'seguro' | 'marbete' | 'licencia' | 'matricula' | 'otro'
+export const NOMBRES_DOCUMENTO: Record<TipoDocumento, string> = {
+  seguro: 'Seguro',
+  marbete: 'Marbete',
+  licencia: 'Licencia de conducir',
+  matricula: 'Matrícula',
+  otro: 'Otro',
+}
+
+export interface Documento {
+  id: string
+  tipo: TipoDocumento
+  nombre: string | null
+  vence: string
+  nota: string | null
+}
+
+export interface DatosVehiculo {
+  vehiculo: Vehiculo
+  kmActual: number
+  cargas: CargaCombustible[]
+  mantenimientos: Mantenimiento[]
+  recordatorios: Recordatorio[]
+  documentos: Documento[]
+}
+
+/** Carga el vehículo activo con todo su historial (null si aún no hay vehículo). */
+export async function obtenerDatosVehiculo(): Promise<DatosVehiculo | null> {
+  const vehiculo = revisar(
+    await supabase.from('vehiculos').select('id,marca,modelo,anio,placa,km_registro,combustible')
+      .eq('activo', true).order('creado_en').limit(1).maybeSingle(),
+  ) as Vehiculo | null
+  if (!vehiculo) return null
+  const [km, cargas, mants, recs, docs] = await Promise.all([
+    supabase.from('vehiculos_km').select('km_actual').eq('vehiculo_id', vehiculo.id).maybeSingle(),
+    supabase.from('cargas_combustible').select('id,fecha,galones,total_centavos,km,tanque_lleno,cuenta_id,nota')
+      .eq('vehiculo_id', vehiculo.id).order('fecha', { ascending: false }).order('creado_en', { ascending: false }),
+    supabase.from('mantenimientos').select('id,tipo,fecha,km,costo_centavos,cuenta_id,taller,nota')
+      .eq('vehiculo_id', vehiculo.id).order('fecha', { ascending: false }),
+    supabase.from('recordatorios').select('id,tipo,cada_km,cada_meses,ultimo_km,ultima_fecha')
+      .eq('vehiculo_id', vehiculo.id).order('cada_km', { ascending: true, nullsFirst: false }),
+    supabase.from('documentos').select('id,tipo,nombre,vence,nota').order('vence'),
+  ])
+  return {
+    vehiculo,
+    kmActual: Number((revisar(km) as { km_actual: number } | null)?.km_actual ?? vehiculo.km_registro),
+    cargas: (revisar(cargas) as CargaCombustible[]).map((c) => ({
+      ...c, galones: Number(c.galones), total_centavos: Number(c.total_centavos),
+    })),
+    mantenimientos: (revisar(mants) as Mantenimiento[]).map((m) => ({ ...m, costo_centavos: Number(m.costo_centavos) })),
+    recordatorios: revisar(recs) as Recordatorio[],
+    documentos: revisar(docs) as Documento[],
+  }
+}
+
+export async function guardarVehiculo(v: Omit<Vehiculo, 'id'> & { id?: string }) {
+  const { id, ...resto } = v
+  if (id) revisar(await supabase.from('vehiculos').update(resto).eq('id', id))
+  else revisar(await supabase.from('vehiculos').insert(resto))
+}
+
+type SinId<T> = Omit<T, 'id'>
+
+async function guardarEn<T extends object>(tabla: string, fila: T, id?: string) {
+  if (id) revisar(await supabase.from(tabla).update(fila).eq('id', id))
+  else revisar(await supabase.from(tabla).insert(fila))
+}
+async function borrarDe(tabla: string, id: string) {
+  revisar(await supabase.from(tabla).delete().eq('id', id))
+}
+
+export const guardarCarga = (vehiculoId: string, c: SinId<CargaCombustible>, id?: string) =>
+  guardarEn('cargas_combustible', id ? c : { ...c, vehiculo_id: vehiculoId }, id)
+export const borrarCarga = (id: string) => borrarDe('cargas_combustible', id)
+
+export const guardarMantenimiento = (vehiculoId: string, m: SinId<Mantenimiento>, id?: string) =>
+  guardarEn('mantenimientos', id ? m : { ...m, vehiculo_id: vehiculoId }, id)
+export const borrarMantenimiento = (id: string) => borrarDe('mantenimientos', id)
+
+export const guardarRecordatorio = (vehiculoId: string, r: SinId<Recordatorio>, id?: string) =>
+  guardarEn('recordatorios', id ? r : { ...r, vehiculo_id: vehiculoId }, id)
+export const borrarRecordatorio = (id: string) => borrarDe('recordatorios', id)
+
+export const guardarDocumento = (vehiculoId: string, d: SinId<Documento>, id?: string) =>
+  guardarEn('documentos', id ? d : { ...d, vehiculo_id: d.tipo === 'licencia' ? null : vehiculoId }, id)
+export const borrarDocumento = (id: string) => borrarDe('documentos', id)

@@ -1,14 +1,15 @@
 import { Link } from 'react-router-dom'
 import { Aviso, btnPrincipal, tarjeta } from '../components/ui'
-import { listarCuentas, listarMovimientos, obtenerTasaUSD } from '../lib/datos'
+import { NOMBRES_DOCUMENTO, listarCuentas, listarMovimientos, obtenerDatosVehiculo, obtenerTasaUSD } from '../lib/datos'
 import { enPesos, formatear } from '../lib/dinero'
 import { fechaLarga, hoyISO, mesActual, nombreMes, rangoMes } from '../lib/fechas'
 import { resumir } from '../lib/resumen'
 import { useDatos } from '../lib/useDatos'
+import { COLORES_ESTADO, estadoDocumento, estadoRecordatorio } from '../lib/vehiculo'
 
 const PASOS = [
   { titulo: 'Crea tus cuentas', texto: 'Efectivo, banco y tu cuenta en dólares.', ruta: '/cuentas' },
-  { titulo: 'Pon la tasa del dólar', texto: 'Para sumar tus US$ al total en pesos.', ruta: '/ajustes' },
+  { titulo: 'Registra tu vehículo', texto: 'Combustible, mantenimientos y documentos.', ruta: '/vehiculo' },
   { titulo: 'Anota tus movimientos', texto: 'Lo que ganas y gastas cada día.', ruta: '/movimientos' },
   { titulo: 'Registra tu jornada', texto: 'Lo que ganaste hoy en InDrive y Uber.', ruta: '/jornadas' },
 ]
@@ -18,6 +19,17 @@ export default function Inicio() {
   const cuentas = useDatos(() => listarCuentas(), [])
   const tasa = useDatos(obtenerTasaUSD, [])
   const movs = useDatos(() => listarMovimientos(rangoMes(mes)), [mes])
+  const vehiculo = useDatos(obtenerDatosVehiculo, [])
+
+  const v = vehiculo.datos
+  const alertas = v
+    ? [
+        ...v.recordatorios.map((r) => estadoRecordatorio(r, v.kmActual)).filter((e) => e.estado !== 'ok')
+          .map((e) => ({ clave: e.recordatorio.id, estado: e.estado, texto: `${e.recordatorio.tipo}: ${e.texto}` })),
+        ...v.documentos.map((d) => ({ d, e: estadoDocumento(d) })).filter(({ e }) => e.estado !== 'ok')
+          .map(({ d, e }) => ({ clave: d.id, estado: e.estado, texto: `${NOMBRES_DOCUMENTO[d.tipo]}: ${e.texto.toLowerCase()}` })),
+      ]
+    : []
 
   const lista = cuentas.datos ?? []
   const tasaUSD = tasa.datos ?? null
@@ -47,6 +59,20 @@ export default function Inicio() {
           <Dato titulo="Ingresos del mes" valor={formatear(resumen.ingresos)} color="text-marca" />
           <Dato titulo="Gastos del mes" valor={formatear(resumen.gastos)} color="text-peligro" />
         </div>
+      )}
+
+      {alertas.length > 0 && (
+        <section className={`${tarjeta} p-5 space-y-3`}>
+          <div className="flex justify-between items-center">
+            <h2 className="font-semibold">Alertas del vehículo</h2>
+            <Link to="/vehiculo" className="text-sm font-semibold text-marca">Ver vehículo</Link>
+          </div>
+          <ul className="flex flex-wrap gap-2">
+            {alertas.map((a) => (
+              <li key={a.clave} className={`text-sm font-semibold px-3 py-1.5 rounded-full ${COLORES_ESTADO[a.estado].etiqueta}`}>{a.texto}</li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <section className={`${tarjeta} p-6 space-y-4`}>
