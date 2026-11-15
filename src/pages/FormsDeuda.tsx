@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { Aviso, Campo, btnPrincipal, inputCls } from '../components/ui'
 import {
-  NOMBRES_DEUDA, NOMBRES_FRECUENCIA, borrarCuenta, crearCuentaTarjeta, guardarDeuda, guardarPagoDeuda, type CuentaConSaldo, type Deuda,
-  type DeudaConEstado, type FrecuenciaPago, type TipoDeuda,
+  NOMBRES_DEUDA, NOMBRES_FRECUENCIA, NOMBRES_SISTEMA, borrarCuenta, crearCuentaTarjeta, guardarDeuda, guardarPagoDeuda, type CuentaConSaldo, type Deuda,
+  type DeudaConEstado, type FrecuenciaPago, type SistemaPrestamo, type TipoDeuda,
 } from '../lib/datos'
-import { cuotaMensual, interesMensual, tasaAnual, type PeriodoTasa } from '../lib/deudas'
+import { PAGOS_POR_ANIO, cuotaMensual, datosPrestamo, desglosePago, tasaAnual, type DatosPrestamo, type PeriodoTasa } from '../lib/deudas'
 import { aCentavos, aTexto, formatear } from '../lib/dinero'
 import { hoyISO } from '../lib/fechas'
 
@@ -43,19 +43,29 @@ export function FormDeuda({ deuda, cuentas, onListo }: { deuda: DeudaConEstado |
   const [vinculo, setVinculo] = useState(deuda ? deuda.cuenta_tarjeta_id ?? '' : 'nueva')
   const [enMeta, setEnMeta] = useState(deuda?.incluir_en_meta ?? true)
   const [plazo, setPlazo] = useState('')
+  const [sistema, setSistema] = useState<SistemaPrestamo>(deuda?.sistema ?? 'cuota_fija')
+  const [prestado, setPrestado] = useState(deuda?.monto_prestado_centavos ? aTexto(deuda.monto_prestado_centavos) : '')
   const [error, setError] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
 
   const esTarjeta = tipo === 'tarjeta'
   const vinculada = esTarjeta && vinculo !== ''
-  const esPrestamo = !esTarjeta && frecuencia === 'mensual'
+  const sis: SistemaPrestamo = esTarjeta ? 'cuota_fija' : sistema
+  const esPrestamo = !esTarjeta && frecuencia === 'mensual' && sis === 'cuota_fija'
   const tasaCalculada = plazo ? tasaDesdeCuota(aCentavos(saldo) ?? 0, aCentavos(cuota) ?? 0, Number(plazo)) : null
   const tasaNum = Number((tasa || '0').replace(',', '.'))
   const anualVista = tasaNum > 0 && periodo !== 'anual' ? tasaAnual(tasaNum, periodo) : null
   const c = aCentavos(cuota) ?? 0
   const s = aCentavos(saldo) ?? 0
-  const interesMes = s && tasaNum ? interesMensual(s, periodo === 'anual' ? tasaNum : tasaAnual(tasaNum, periodo)) : 0
   const mensual = cuotaMensual(c, frecuencia)
+  // Cómo queda el próximo pago con lo que va escrito en el formulario.
+  const prueba: DatosPrestamo = {
+    saldo: deuda && !deuda.cuenta_tarjeta_id ? Math.max(0, deuda.saldo_centavos - deuda.saldo_inicial_centavos + s) : s,
+    tasa_anual: tasaAnual(tasaNum || 0, periodo), cuota: c, frecuencia: esTarjeta ? 'mensual' : frecuencia, sistema: sis,
+    monto_prestado: aCentavos(prestado) ?? s,
+  }
+  const proximo = prueba.saldo > 0 && prueba.tasa_anual > 0 ? desglosePago(prueba) : null
+  const soloReditos = proximo != null && sis !== 'solo_interes' && sis !== 'capital_fijo' && c > 0 && proximo.capital <= 0
 
   async function guardar(e: FormEvent) {
     e.preventDefault()
@@ -67,6 +77,9 @@ export function FormDeuda({ deuda, cuentas, onListo }: { deuda: DeudaConEstado |
     if (frecuencia === 'quincenal' && (!dia || !dia2)) return setError('Pon los dos días del mes en que pagas (ej.: 15 y 30).')
     const anual = Math.round(tasaAnual(tasaNum, periodo) * 100) / 100
     if (anual > 1000) return setError('Esa tasa es demasiado alta; revisa el número y el periodo.')
+    const prest = !esTarjeta && sis === 'interes_fijo' && prestado.trim() ? aCentavos(prestado) : null
+    if (!esTarjeta && sis === 'interes_fijo' && prestado.trim() && !prest) return setError('Escribe cuánto te prestaron.')
+    if (!esTarjeta && sis !== 'solo_interes' && !cc) return setError(sis === 'capital_fijo' ? 'Escribe cuánto abonas a capital en cada pago.' : 'Escribe la cuota.')
     const lim = limite.trim() ? aCentavos(limite) : null
     if (limite.trim() && !lim) return setError('Escribe un límite de crédito válido.')
     setGuardando(true)
@@ -78,7 +91,11 @@ export function FormDeuda({ deuda, cuentas, onListo }: { deuda: DeudaConEstado |
       await guardarDeuda({
         nombre: nombre.trim(), tipo, acreedor: acreedor.trim() || null,
         saldo_inicial_centavos: cuentaTarjeta ? 0 : sc,
-        tasa_anual: anual, cuota_centavos: cc,
+        tasa_anual: anual,
+        // Solo réditos: la cuota es el interés de cada pago.
+        cuota_centavos: sis === 'solo_interes' ? desglosePago({ ...prueba, tasa_anual: anual }).interes : cc,
+        sistema: sis,
+        monto_prestado_centavos: prest,
         frecuencia: esTarjeta ? 'mensual' : frecuencia,
         dia_pago: frecuencia === 'semanal' || frecuencia === 'diaria' ? null : dia ? Number(dia) : null,
         dia_pago_2: frecuencia === 'quincenal' && dia2 ? Number(dia2) : null,
@@ -136,16 +153,36 @@ export function FormDeuda({ deuda, cuentas, onListo }: { deuda: DeudaConEstado |
 
       {!esTarjeta && (
         <Campo etiqueta="¿Cada cuánto pagas?">
-          <select value={frecuencia} onChange={(e) => setFrecuencia(e.target.value as FrecuenciaPago)} className={inputCls}>
+          <select value={frecuencia} onChange={(e) => {
+            const f = e.target.value as FrecuenciaPago
+            setFrecuencia(f)
+            // La tasa casi siempre se dice por el mismo periodo en que se paga ("5% semanal", "10% quincenal").
+            if (!deuda && !tasa) setPeriodo(f)
+          }} className={inputCls}>
             {Object.entries(NOMBRES_FRECUENCIA).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
           </select>
         </Campo>
       )}
 
-      <Campo etiqueta={esTarjeta ? 'Pago mínimo al mes (RD$)' : `Cuota por pago (RD$)`}
-        ayuda={!esTarjeta && frecuencia !== 'mensual' && c > 0 ? `Equivale a ${formatear(mensual)} al mes.` : undefined}>
-        <input inputMode="decimal" value={cuota} onChange={(e) => setCuota(e.target.value)} className={inputCls} placeholder="0.00" />
-      </Campo>
+      {!esTarjeta && (
+        <Campo etiqueta="¿Cómo te cobran el interés?" ayuda={NOMBRES_SISTEMA[sistema].detalle}>
+          <select value={sistema} onChange={(e) => setSistema(e.target.value as SistemaPrestamo)} className={inputCls}>
+            {Object.entries(NOMBRES_SISTEMA).map(([v, n]) => <option key={v} value={v}>{n.nombre}</option>)}
+          </select>
+        </Campo>
+      )}
+      {!esTarjeta && sistema === 'interes_fijo' && (
+        <Campo etiqueta="¿Cuánto te prestaron? (RD$)" ayuda="Sobre esto se calcula el interés. Si lo dejas vacío, se usa el saldo.">
+          <input inputMode="decimal" value={prestado} onChange={(e) => setPrestado(e.target.value)} className={inputCls} placeholder="Ej.: 20,000" />
+        </Campo>
+      )}
+
+      {sis !== 'solo_interes' && (
+        <Campo etiqueta={esTarjeta ? 'Pago mínimo al mes (RD$)' : sis === 'capital_fijo' ? 'Abono a capital en cada pago (RD$)' : 'Cuota por pago (RD$)'}
+          ayuda={sis === 'capital_fijo' ? 'Lo que baja la deuda en cada pago; el interés se suma aparte.' : !esTarjeta && frecuencia !== 'mensual' && c > 0 ? `Equivale a ${formatear(mensual)} al mes.` : undefined}>
+          <input inputMode="decimal" value={cuota} onChange={(e) => setCuota(e.target.value)} className={inputCls} placeholder="0.00" />
+        </Campo>
+      )}
 
       {!esTarjeta && frecuencia === 'mensual' && (
         <Campo etiqueta="Día de pago (1–31)"><input inputMode="numeric" value={dia} onChange={(e) => setDia(soloDias(e.target.value))} className={inputCls} placeholder="Ej.: 17" /></Campo>
@@ -178,7 +215,7 @@ export function FormDeuda({ deuda, cuentas, onListo }: { deuda: DeudaConEstado |
           </select>
         </div>
       </Campo>
-      {(anualVista || (interesMes > 0 && mensual > 0)) && (
+      {(anualVista != null || proximo != null) && (
         <div className="sm:col-span-2 space-y-2">
           {anualVista != null && (
             <p className={`text-sm rounded-lg px-3 py-2 ${anualVista >= 60 ? 'bg-red-50 text-peligro' : 'bg-gray-50 text-suave'}`}>
@@ -186,11 +223,19 @@ export function FormDeuda({ deuda, cuentas, onListo }: { deuda: DeudaConEstado |
               {anualVista >= 60 && ' Es un préstamo muy caro: conviene salir de él primero.'}
             </p>
           )}
-          {interesMes > 0 && mensual > 0 && mensual <= interesMes && (
+          {proximo != null && !esTarjeta && (soloReditos ? (
             <p className="text-sm rounded-lg px-3 py-2 bg-red-50 text-peligro">
-              Pagas {formatear(mensual)} al mes y los intereses son {formatear(interesMes)}: <b>solo cubres réditos, el capital no baja</b>. Necesitas abonar a capital para salir.
+              Tu cuota es {formatear(c)} y el interés de cada pago es {formatear(proximo.interes)}: <b>solo cubres réditos, el capital no baja</b>. Necesitas abonar a capital para salir.
             </p>
-          )}
+          ) : (proximo.cuota > 0 && (
+            <p className="text-sm rounded-lg px-3 py-2 bg-gray-50">
+              Próximo pago: <b>{formatear(proximo.cuota)}</b> = <b className="text-peligro">{formatear(proximo.interes)}</b> de interés + <b className="text-marca">{formatear(proximo.capital)}</b> a capital.
+              {sis === 'cuota_fija' && ' El interés irá bajando en cada pago y el capital subiendo.'}
+              {sis === 'capital_fijo' && ' Cada cuota será un poco más baja que la anterior.'}
+              {sis === 'interes_fijo' && ' El interés no baja aunque debas menos: abonar extra no te ahorra intereses de cada pago, pero sí termina antes.'}
+              {sis === 'solo_interes' && ' Pagando solo esto, la deuda nunca baja.'}
+            </p>
+          )))}
         </div>
       )}
 
@@ -235,7 +280,8 @@ export function FormPago({ deuda, cuentas, sugerido, onListo }: {
   const [tipo, setTipo] = useState<'pago' | 'cargo'>('pago')
   const [fecha, setFecha] = useState(hoyISO())
   const [monto, setMonto] = useState(sugerido ? aTexto(sugerido) : '')
-  const interesEstimado = interesMensual(deuda.saldo_centavos, deuda.tasa_anual)
+  const prestamo = datosPrestamo(deuda)
+  const interesEstimado = desglosePago(prestamo).interes
   const [interes, setInteres] = useState(interesEstimado ? aTexto(interesEstimado) : '0')
   const pesos = cuentas.filter((c) => c.moneda === 'DOP' && !c.archivada && c.tipo !== 'tarjeta' && c.tipo !== 'inversion')
   const [cuenta, setCuenta] = useState(pesos.find((c) => c.tipo === 'efectivo')?.id ?? pesos[0]?.id ?? '')
@@ -282,7 +328,7 @@ export function FormPago({ deuda, cuentas, sugerido, onListo }: {
       {tipo === 'pago' && (
         <>
           {!vinculada && (
-            <Campo etiqueta="De eso, intereses (RD$)" ayuda={`Estimado: ${formatear(interesEstimado)} este mes. Cópialo de tu estado de cuenta si lo tienes.`}>
+            <Campo etiqueta="De eso, intereses (RD$)" ayuda={`Calculado: ${formatear(interesEstimado)} en este pago (${Math.round((prestamo.tasa_anual / PAGOS_POR_ANIO[prestamo.frecuencia]) * 100) / 100}% sobre ${prestamo.sistema === 'interes_fijo' ? 'lo prestado' : 'lo que debes'}). Si tu recibo dice otra cosa, pon lo del recibo.`}>
               <input inputMode="decimal" value={interes} onChange={(e) => setInteres(e.target.value)} className={inputCls} />
             </Campo>
           )}
@@ -293,7 +339,8 @@ export function FormPago({ deuda, cuentas, sugerido, onListo }: {
             </select>
           </Campo>
           <p className="sm:col-span-2 text-sm text-suave">
-            Baja tu deuda en <b className="text-marca">{formatear(Math.max(0, m - i))}</b> (el resto son intereses). Saldo después: {formatear(Math.max(0, deuda.saldo_centavos - (m - i)))}
+            {i > 0 && <><b className="text-peligro">{formatear(i)}</b> se va en intereses y </>}
+            <b className="text-marca">{formatear(Math.max(0, m - i))}</b> baja tu deuda. Saldo después: <b>{formatear(Math.max(0, deuda.saldo_centavos - (m - i)))}</b>
           </p>
         </>
       )}

@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Aviso, btnPrincipal, tarjeta } from '../components/ui'
-import { NOMBRES_DOCUMENTO, listarCategorias, listarInversiones, listarMetas, listarCuentas, listarDeudas, listarPresupuestos, obtenerUmbralAlerta, listarMovimientos, obtenerDatosVehiculo, obtenerTasaUSD } from '../lib/datos'
-import { enPesos, formatear } from '../lib/dinero'
+import { NOMBRES_DOCUMENTO, recurrentesPendientes, registrarRecurrente, saltarRecurrente, listarCategorias, listarInversiones, listarMetas, listarCuentas, listarDeudas, listarPresupuestos, obtenerUmbralAlerta, listarMovimientos, obtenerDatosVehiculo, obtenerTasaUSD } from '../lib/datos'
+import { aCentavos, aTexto, enPesos, formatear } from '../lib/dinero'
 import { fechaLarga, hoyISO, mesActual, nombreMes, rangoMes } from '../lib/fechas'
 import { resumir } from '../lib/resumen'
 import { useDatos } from '../lib/useDatos'
@@ -32,6 +33,7 @@ export default function Inicio() {
 
   const deudas = useDatos(listarDeudas, [])
   const metas = useDatos(listarMetas, [])
+  const pendientes = useDatos(recurrentesPendientes, [])
   const inversiones = useDatos(listarInversiones, [])
   const presupuesto = useDatos(async () => {
     const [ps, cats, umbral] = await Promise.all([listarPresupuestos(mes), listarCategorias(), obtenerUmbralAlerta()])
@@ -149,6 +151,20 @@ export default function Inicio() {
         </Link>
       )}
 
+      {(pendientes.datos ?? []).length > 0 && (
+        <section className={`${tarjeta} p-5 space-y-3`}>
+          <div className="flex justify-between items-center">
+            <h2 className="font-semibold">Pendientes de confirmar</h2>
+            <Link to="/recurrentes" className="text-sm font-semibold text-marca">Ver recurrentes</Link>
+          </div>
+          <ul className="divide-y divide-borde">
+            {(pendientes.datos ?? []).map((r) => (
+              <FilaPendiente key={r.id + r.proxima_fecha} r={r} onListo={() => { pendientes.recargar(); movs.recargar(); cuentas.recargar() }} />
+            ))}
+          </ul>
+        </section>
+      )}
+
       {todasAlertas.length > 0 && (
         <section className={`${tarjeta} p-5 space-y-3`}>
           <div className="flex justify-between items-center">
@@ -209,5 +225,29 @@ function Dato({ titulo, valor, color = '', nota }: { titulo: string; valor: stri
       <p className={`text-2xl font-bold ${color}`}>{valor}</p>
       {nota && <p className="text-xs text-suave mt-1">{nota}</p>}
     </div>
+  )
+}
+
+function FilaPendiente({ r, onListo }: { r: Awaited<ReturnType<typeof recurrentesPendientes>>[number]; onListo: () => void }) {
+  const [monto, setMonto] = useState(aTexto(r.monto_centavos))
+  const [error, setError] = useState<string | null>(null)
+  const hacer = async (fn: () => Promise<void>) => {
+    try { await fn(); onListo() } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+  }
+  return (
+    <li className="flex flex-wrap items-center gap-3 py-2.5">
+      <div className="flex-1 min-w-48">
+        <p className="font-semibold text-sm">{r.nombre}</p>
+        <p className="text-xs text-suave">Tocaba el {fechaLarga(r.proxima_fecha).toLowerCase()}</p>
+        {error && <p className="text-xs text-peligro">{error}</p>}
+      </div>
+      <input aria-label={`Monto de ${r.nombre}`} inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)}
+        className="h-9 w-32 rounded-lg border border-gray-300 px-2 text-sm" />
+      <button className="h-9 px-3 rounded-lg bg-marca text-white text-sm font-semibold cursor-pointer"
+        onClick={() => { const c = aCentavos(monto); if (!c) return setError('Monto no válido'); hacer(() => registrarRecurrente(r, c)) }}>
+        Anotar
+      </button>
+      <button className="text-sm text-suave hover:text-tinta cursor-pointer" onClick={() => hacer(() => saltarRecurrente(r))}>Saltar</button>
+    </li>
   )
 }

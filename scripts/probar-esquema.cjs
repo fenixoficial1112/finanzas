@@ -6,7 +6,10 @@ const ok = (c, m) => { console.log((c ? 'OK   ' : 'FALLA') + ' ' + m); if (!c) p
 (async () => {
   const SQL = await initSqlJs();
   const db = new SQL.Database();
-  db.exec(fs.readFileSync(require('node:path').join(__dirname, '..', 'src', 'lib', 'bd', 'esquema.sql'), 'utf8'));
+  // Todas las migraciones en orden, como al abrir la app.
+  for (const f of ['esquema.sql', 'esquema2.sql', 'esquema3.sql']) {
+    db.exec(fs.readFileSync(require('node:path').join(__dirname, '..', 'src', 'lib', 'bd', f), 'utf8'));
+  }
   db.exec('PRAGMA foreign_keys = ON');
   const q = (s, p = []) => { const st = db.prepare(s); st.bind(p); const r = []; while (st.step()) r.push(st.getAsObject()); st.free(); return r };
   const uno = (s, p) => q(s, p)[0];
@@ -96,5 +99,19 @@ const ok = (c, m) => { console.log((c ? 'OK   ' : 'FALLA') + ' ' + m); if (!c) p
   db.run("insert into presupuestos (mes,categoria_id,limite_centavos) values ('2026-11',?,1500000) on conflict (mes,categoria_id) do update set limite_centavos=excluded.limite_centavos", [cat('Comida','gasto')]);
   ok(uno("select count(*) n, max(limite_centavos) l from presupuestos").l === 1500000, 'actualizar un límite no lo duplica');
   ok(falla("insert into inversiones (nombre,tipo,moneda,cuenta_id) values ('x','otra','DOP','b')", [], 'inversión') === 'ok', 'inversión con cuenta que no es de inversión rechazada');
+  // recurrentes (v2)
+  db.run("insert into recurrentes (id,nombre,tipo,monto_centavos,cuenta_id,categoria_id,frecuencia,dia_mes,proxima_fecha) values ('r','Alquiler','gasto',1500000,'b',?,'mensual',1,'2026-12-01')", [cat('Casa y servicios','gasto')]);
+  ok(falla("insert into recurrentes (nombre,tipo,monto_centavos,cuenta_id,categoria_id,frecuencia,proxima_fecha) values ('x','gasto',1,'b',?,'mensual','2026-12-01')", [cat('Uber','ingreso')], 'Categoría no válida') === 'ok', 'recurrente con categoría de otro tipo rechazado');
+  ok(falla("insert into recurrentes (nombre,tipo,monto_centavos,cuenta_id,frecuencia,proxima_fecha) values ('x','transferencia',1,'b','mensual','2026-12-01')", [], 'CHECK') === 'ok', 'transferencia recurrente sin destino rechazada');
+  db.run("insert into movimientos (tipo,monto_centavos,cuenta_id,recurrente_id) values ('gasto',1500000,'b','r')");
+  db.run("delete from recurrentes where id='r'");
+  ok(uno("select count(*) n from movimientos where monto_centavos=1500000 and recurrente_id is null").n === 1, 'borrar un recurrente deja sus movimientos');
+  // tipo de préstamo (v3)
+  db.run("insert into deudas (id,nombre,saldo_inicial_centavos) values ('dp','Prueba',100)");
+  ok(uno("select sistema from deudas where id='dp'").sistema === 'cuota_fija', 'préstamo nuevo: cuota fija por defecto');
+  ok(falla("update deudas set sistema='raro' where id='dp'", [], 'CHECK') === 'ok', 'tipo de préstamo inválido rechazado');
+  db.run("update deudas set sistema='interes_fijo', monto_prestado_centavos=2000000 where id='dp'");
+  ok(uno("select monto_prestado_centavos m from deudas where id='dp'").m === 2000000, 'monto prestado guardado');
+
   ok(uno('pragma foreign_key_check') === undefined, 'integridad de claves foráneas');
 })();

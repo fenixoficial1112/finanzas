@@ -22,6 +22,16 @@ contextBridge.exposeInMainWorld('fenix', {
     exportar: (bytes) => invocar('bd:exportar', bytes),
     importar: () => invocar('bd:importar'),
   },
+  app: {
+    estadoActualizacion: () => invocar('app:estado-actualizacion'),
+    buscarActualizacion: () => invocar('app:buscar-actualizacion'),
+    instalarActualizacion: () => invocar('app:instalar-actualizacion'),
+    alActualizar: (callback) => {
+      const manejador = (_evento, estado) => callback(estado)
+      ipcRenderer.on('actualizacion', manejador)
+      return () => ipcRenderer.removeListener('actualizacion', manejador)
+    },
+  },
   asesor: {
     estado: () => invocar('asesor:estado'),
     guardarClave: (clave) => invocar('asesor:guardar-clave', clave),

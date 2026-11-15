@@ -1,11 +1,12 @@
 // Arma el resumen de datos que se envía al asesor IA. Todas las cuentas se hacen aquí
 // (con la misma lógica que usan las pantallas) para que la IA solo tenga que explicarlas.
 import {
+  NOMBRES_SISTEMA,
   NOMBRES_DEUDA, NOMBRES_INVERSION, NOMBRES_DOCUMENTO, NOMBRES_OBLIGACION, listarCategorias, listarCuentas, listarDeudas, listarInversiones, listarJornadas,
   listarMetas, listarMovimientos, listarPlataformas, listarPresupuestos, obtenerDatosVehiculo, obtenerUmbralAlerta, obtenerPlanDeudas, obtenerTasaUSD, totalesPorPlataforma,
   type CuentaConSaldo, type Movimiento,
 } from './datos'
-import { cuotaMensual, interesMensual, mesFuturo, simular, textoFrecuencia, type DeudaSim, type ResultadoSim } from './deudas'
+import { aSimulacion, cuotaMensual, datosPrestamo, desglosePago, mesDeDeuda, mesFuturo, simular, textoFrecuencia, type ResultadoSim } from './deudas'
 import { enPesos } from './dinero'
 import { diasDelMes, haceDias, hoyISO, mesActual, nombreMes, rangoMes } from './fechas'
 import { cargarMeta, DIAS_HISTORIAL } from './useMeta'
@@ -94,7 +95,7 @@ export async function construirContexto() {
 
   // ----- Deudas -----
   const activas = deudas.filter((d) => !d.pagada && d.saldo_centavos > 0)
-  const sims: DeudaSim[] = activas.map((d) => ({ id: d.id, nombre: d.nombre, saldo: d.saldo_centavos, tasaAnual: d.tasa_anual, cuota: cuotaMensual(d.cuota_centavos, d.frecuencia) }))
+  const sims = activas.map(aSimulacion)
   const extra = planDeudas.pago_extra_deudas_centavos
   const av = simular(sims, 'avalancha', extra)
   const bn = simular(sims, 'bola_nieve', extra)
@@ -180,18 +181,21 @@ export async function construirContexto() {
     })),
     deudas: activas.length === 0 ? { activas: 0 } : {
       total: rd(activas.reduce((s, d) => s + d.saldo_centavos, 0)),
-      intereses_este_mes: rd(activas.reduce((s, d) => s + interesMensual(d.saldo_centavos, d.tasa_anual), 0)),
-      cuotas_al_mes: rd(activas.reduce((s, d) => s + cuotaMensual(d.cuota_centavos, d.frecuencia), 0)),
+      intereses_este_mes: rd(activas.reduce((s, d) => s + mesDeDeuda(d).interes, 0)),
+      cuotas_al_mes: rd(activas.reduce((s, d) => s + mesDeDeuda(d).cuota, 0)),
       estrategia_elegida: planDeudas.estrategia_deudas === 'avalancha' ? 'avalancha' : 'bola de nieve',
       pago_extra_mensual: rd(extra),
       lista: elegido.orden.map((id, i) => {
         const d = activas.find((x) => x.id === id)!
-        const im = interesMensual(d.saldo_centavos, d.tasa_anual)
+        const im = mesDeDeuda(d).interes
+        const prox = desglosePago(datosPrestamo(d))
         return {
           prioridad: i + 1, nombre: d.nombre, tipo: NOMBRES_DEUDA[d.tipo], saldo: rd(d.saldo_centavos), tasa_anual_pct: d.tasa_anual,
           cuota_por_pago: rd(d.cuota_centavos), frecuencia: d.frecuencia, cuando_paga: textoFrecuencia(d),
           cuota_mensual_equivalente: rd(cuotaMensual(d.cuota_centavos, d.frecuencia)), interes_mensual: rd(im),
-          cuota_no_cubre_intereses: d.tasa_anual > 0 && cuotaMensual(d.cuota_centavos, d.frecuencia) <= im,
+          como_cobra_interes: d.tipo === 'tarjeta' ? 'tarjeta: interés sobre el balance' : NOMBRES_SISTEMA[d.sistema].detalle,
+          proximo_pago: { cuota: rd(prox.cuota), interes: rd(prox.interes), capital: rd(prox.capital) },
+          cuota_no_cubre_intereses: d.tasa_anual > 0 && prox.capital <= 0,
           ...(d.tipo === 'tarjeta' ? {
             limite_credito: d.limite_credito_centavos ? rd(d.limite_credito_centavos) : null,
             uso_del_limite_pct: d.limite_credito_centavos ? Math.round((d.saldo_centavos / d.limite_credito_centavos) * 100) : null,

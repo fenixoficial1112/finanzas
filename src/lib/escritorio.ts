@@ -1,5 +1,15 @@
 // Integración con el programa de escritorio (Electron). En el navegador, todo esto queda inactivo.
 
+export interface EstadoActualizacion {
+  estado: 'sin-revisar' | 'desarrollo' | 'revisando' | 'al-dia' | 'descargando' | 'lista' | 'error'
+  /** Versión instalada. */
+  version: string
+  /** Versión nueva disponible. */
+  nueva?: string
+  progreso?: number
+  mensaje?: string
+}
+
 export interface PuenteEscritorio {
   esEscritorio: true
   /** Abre una URL https en el navegador del sistema. */
@@ -18,6 +28,12 @@ export interface PuenteEscritorio {
     exportar: (bytes: Uint8Array) => Promise<string | null>
     /** Pide un archivo de copia y devuelve su contenido (null si se canceló). */
     importar: () => Promise<Uint8Array | null>
+  }
+  app: {
+    estadoActualizacion: () => Promise<EstadoActualizacion>
+    buscarActualizacion: () => Promise<void>
+    instalarActualizacion: () => Promise<void>
+    alActualizar: (callback: (estado: EstadoActualizacion) => void) => () => void
   }
   asesor: {
     estado: () => Promise<{ tieneClave: boolean; cifrado: boolean }>

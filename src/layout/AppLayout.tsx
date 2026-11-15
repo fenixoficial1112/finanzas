@@ -1,11 +1,14 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { Logo } from './Logo'
+import { escritorio } from '../lib/escritorio'
+import { useActualizacion } from '../lib/useActualizacion'
 
 const SECCIONES = [
   { ruta: '/', nombre: 'Inicio' },
   { ruta: '/meta', nombre: 'Mi meta diaria' },
   { ruta: '/movimientos', nombre: 'Movimientos' },
   { ruta: '/cuentas', nombre: 'Cuentas' },
+  { ruta: '/recurrentes', nombre: 'Pagos recurrentes' },
   { ruta: '/jornadas', nombre: 'Jornadas InDrive / Uber' },
   { ruta: '/vehiculo', nombre: 'Vehículo' },
   { ruta: '/presupuesto', nombre: 'Presupuesto' },
@@ -21,6 +24,7 @@ const linkCls = ({ isActive }: { isActive: boolean }) =>
   }`
 
 export default function AppLayout() {
+  const actualizacion = useActualizacion()
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
       <nav aria-label="Menú principal" className="md:w-60 md:min-h-screen bg-tinta text-white p-4 flex flex-col gap-1 md:sticky md:top-0 md:h-screen">
@@ -52,6 +56,14 @@ export default function AppLayout() {
       </nav>
 
       <main className="flex-1 min-w-0 p-6 md:p-8">
+        {actualizacion?.estado === 'lista' && (
+          <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-marca text-white px-4 py-3">
+            <span className="text-sm"><b>Hay una versión nueva de FENIX APP ({actualizacion.nueva}).</b> Se instala sola al cerrar el programa, o ahora mismo:</span>
+            <button className="h-9 px-4 rounded-lg bg-white text-marca-oscuro text-sm font-semibold cursor-pointer" onClick={() => escritorio?.app.instalarActualizacion()}>
+              Reiniciar y actualizar
+            </button>
+          </div>
+        )}
         <Outlet />
       </main>
     </div>

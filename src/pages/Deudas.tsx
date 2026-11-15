@@ -1,14 +1,15 @@
 import { useMemo, useState } from 'react'
 import { Aviso, Encabezado, Modal, btnPrincipal, btnSecundario, inputCls, tarjeta } from '../components/ui'
 import {
-  NOMBRES_DEUDA, borrarDeuda, borrarPagoDeuda, guardarPlanDeudas, listarCuentas, listarDeudas, listarPagosDeuda,
+  NOMBRES_DEUDA, NOMBRES_SISTEMA, borrarDeuda, borrarPagoDeuda, guardarPlanDeudas, listarCuentas, listarDeudas, listarPagosDeuda,
   marcarDeudaPagada, obtenerPlanDeudas, type DeudaConEstado,
 } from '../lib/datos'
 import {
-  PAGOS_POR_MES, cuotaMensual, interesMensual, mesFuturo, proximoPagoDeuda, simular, textoFrecuencia, type DeudaSim, type ResultadoSim,
+  PAGOS_POR_ANIO, PAGOS_POR_MES, aSimulacion, amortizacion, datosPrestamo, desglosePago, mesDeDeuda, mesFuturo, proximoPagoDeuda, simular, textoFrecuencia, type ResultadoSim,
 } from '../lib/deudas'
 import { aCentavos, aTexto, formatear } from '../lib/dinero'
 import { fechaLarga } from '../lib/fechas'
+import { siguienteFecha } from '../lib/recurrentes'
 import { useDatos } from '../lib/useDatos'
 import { FormDeuda, FormPago } from './FormsDeuda'
 
@@ -16,6 +17,7 @@ type Edicion =
   | { que: 'deuda'; deuda: DeudaConEstado | null }
   | { que: 'pago'; deuda: DeudaConEstado; sugerido: number }
   | { que: 'historial'; deuda: DeudaConEstado }
+  | { que: 'tabla'; deuda: DeudaConEstado }
 
 const textoMeses = (r: ResultadoSim) =>
   r.meses == null ? 'Nunca (la cuota no cubre los intereses)' : `${r.meses} ${r.meses === 1 ? 'mes' : 'meses'} · ${mesFuturo(r.meses)}`
@@ -36,7 +38,7 @@ export default function Deudas() {
   const extra = extraTxt !== null ? aCentavos(extraTxt) ?? 0 : extraGuardado
 
   const sims = useMemo(() => {
-    const ds: DeudaSim[] = (deudas.datos ?? []).filter((d) => !d.pagada && d.saldo_centavos > 0).map((d) => ({ id: d.id, nombre: d.nombre, saldo: d.saldo_centavos, tasaAnual: d.tasa_anual, cuota: cuotaMensual(d.cuota_centavos, d.frecuencia) }))
+    const ds = (deudas.datos ?? []).filter((d) => !d.pagada && d.saldo_centavos > 0).map(aSimulacion)
     return {
       minimos: simular(ds, 'minimos', 0),
       avalancha: simular(ds, 'avalancha', extra),
@@ -61,9 +63,9 @@ export default function Deudas() {
   if (errorCarga) return <Aviso>{errorCarga}</Aviso>
 
   const total = activas.reduce((s, d) => s + d.saldo_centavos, 0)
-  const interesesMes = activas.reduce((s, d) => s + interesMensual(d.saldo_centavos, d.tasa_anual), 0)
-  const cuotasMes = activas.reduce((s, d) => s + cuotaMensual(d.cuota_centavos, d.frecuencia), 0)
-  const atrapadas = activas.filter((d) => cuotaMensual(d.cuota_centavos, d.frecuencia) <= interesMensual(d.saldo_centavos, d.tasa_anual) && d.tasa_anual > 0)
+  const interesesMes = activas.reduce((s, d) => s + mesDeDeuda(d).interes, 0)
+  const cuotasMes = activas.reduce((s, d) => s + mesDeDeuda(d).cuota, 0)
+  const atrapadas = activas.filter((d) => d.tasa_anual > 0 && desglosePago(datosPrestamo(d)).capital <= 0)
   const ahorroVsMinimos = sims.minimos.meses != null && elegido.meses != null
     ? { intereses: sims.minimos.totalIntereses - elegido.totalIntereses, meses: sims.minimos.meses - elegido.meses }
     : null
@@ -98,7 +100,7 @@ export default function Deudas() {
 
           {atrapadas.length > 0 && (
             <Aviso>
-              {atrapadas.map((d) => d.nombre).join(', ')}: la cuota no alcanza ni para los intereses ({atrapadas.map((d) => formatear(interesMensual(d.saldo_centavos, d.tasa_anual))).join(', ')} al mes). Pagando solo eso, la deuda nunca baja.
+              {atrapadas.map((d) => d.nombre).join(', ')}: la cuota no alcanza ni para los intereses ({atrapadas.map((d) => formatear(mesDeDeuda(d).interes)).join(', ')} al mes). Pagando solo eso, la deuda nunca baja.
             </Aviso>
           )}
 
@@ -208,6 +210,7 @@ export default function Deudas() {
                         <h3 className="font-semibold truncate">{d.nombre}</h3>
                         <p className="text-xs text-suave">
                           {NOMBRES_DEUDA[d.tipo]}{d.acreedor ? ` · ${d.acreedor}` : ''} · {d.tasa_anual}% anual
+                          {d.tipo !== 'tarjeta' && d.sistema !== 'cuota_fija' && ` · ${NOMBRES_SISTEMA[d.sistema].nombre.toLowerCase()}`}
                           {d.tasa_anual >= 60 && <span className="text-peligro font-semibold"> ({Math.round((d.tasa_anual / 12) * 10) / 10}% al mes)</span>}
                         </p>
                       </div>
@@ -245,6 +248,14 @@ export default function Deudas() {
                         </span>
                       )}
                     </div>
+                    {!terminada && d.tasa_anual > 0 && !d.cuenta_tarjeta_id && (() => {
+                      const p = desglosePago(datosPrestamo(d))
+                      return p.cuota > 0 ? (
+                        <p className="text-xs">
+                          Próximo pago {formatear(p.cuota)}: <b className="text-peligro">{formatear(p.interes)} interés</b> · <b className="text-marca">{formatear(p.capital)} capital</b>
+                        </p>
+                      ) : null
+                    })()}
                     {!terminada && mesFin != null && (
                       <p className="text-xs">Con tu plan la terminas en <b>{mesFuturo(mesFin)}</b>.</p>
                     )}
@@ -256,6 +267,9 @@ export default function Deudas() {
                         </button>
                       )}
                       <button className="text-suave hover:text-tinta cursor-pointer" onClick={() => setEdicion({ que: 'historial', deuda: d })}>Historial</button>
+                      {!terminada && !d.cuenta_tarjeta_id && (
+                        <button className="text-suave hover:text-tinta cursor-pointer" onClick={() => setEdicion({ que: 'tabla', deuda: d })}>Tabla de pagos</button>
+                      )}
                       <button className="text-suave hover:text-tinta cursor-pointer" onClick={() => setEdicion({ que: 'deuda', deuda: d })}>Editar</button>
                       <button className="text-suave hover:text-tinta cursor-pointer" onClick={() => hacer(() => marcarDeudaPagada(d.id, !d.pagada))}>
                         {d.pagada ? 'Reactivar' : 'Marcar pagada'}
@@ -277,14 +291,16 @@ export default function Deudas() {
       )}
 
       <Modal
-        titulo={!edicion ? '' : edicion.que === 'deuda' ? (edicion.deuda ? 'Editar deuda' : 'Nueva deuda') : edicion.que === 'pago' ? `Pago · ${edicion.deuda.nombre}` : `Historial · ${edicion.deuda.nombre}`}
+        titulo={!edicion ? '' : edicion.que === 'deuda' ? (edicion.deuda ? 'Editar deuda' : 'Nueva deuda') : edicion.que === 'pago' ? `Pago · ${edicion.deuda.nombre}` : edicion.que === 'tabla' ? `Tabla de pagos · ${edicion.deuda.nombre}` : `Historial · ${edicion.deuda.nombre}`}
         abierto={edicion !== null}
+        ancho={edicion?.que === 'tabla'}
         onCerrar={() => setEdicion(null)}
       >
         {edicion?.que === 'deuda' && <FormDeuda deuda={edicion.deuda} cuentas={cuentas.datos ?? []} onListo={() => { setEdicion(null); deudas.recargar(); cuentas.recargar() }} />}
         {edicion?.que === 'pago' && (
           <FormPago deuda={edicion.deuda} cuentas={cuentas.datos ?? []} sugerido={edicion.sugerido} onListo={() => { setEdicion(null); deudas.recargar() }} />
         )}
+        {edicion?.que === 'tabla' && <TablaPagos deuda={edicion.deuda} />}
         {edicion?.que === 'historial' && <Historial deudaId={edicion.deuda.id} onCambio={deudas.recargar} />}
       </Modal>
     </div>
@@ -330,6 +346,65 @@ function Dato({ t, v, color = '', nota }: { t: string; v: string; color?: string
       <p className="text-sm text-suave">{t}</p>
       <p className={`text-2xl font-bold first-letter:uppercase ${color}`}>{v}</p>
       {nota && <p className="text-xs text-suave mt-1">{nota}</p>}
+    </div>
+  )
+}
+
+function TablaPagos({ deuda }: { deuda: DeudaConEstado }) {
+  const p = datosPrestamo(deuda)
+  const t = amortizacion(p)
+  const programa = {
+    frecuencia: p.frecuencia, dia_mes: deuda.dia_pago, dia_mes_2: deuda.dia_pago_2, dia_semana: deuda.dia_semana, mes: null,
+  }
+  const prox = proximoPagoDeuda(deuda)
+  const fechas: (string | null)[] = []
+  if (prox) {
+    fechas.push(`${prox.getFullYear()}-${String(prox.getMonth() + 1).padStart(2, '0')}-${String(prox.getDate()).padStart(2, '0')}`)
+    while (fechas.length < t.filas.length) fechas.push(siguienteFecha(programa, fechas[fechas.length - 1]!))
+  }
+  const corta = (iso: string | null) => iso ? new Date(`${iso}T12:00:00`).toLocaleDateString('es-DO', { day: 'numeric', month: 'short', year: 'numeric' }).replace(/ de /g, ' ') : '—'
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-suave">
+        {NOMBRES_SISTEMA[p.sistema].detalle} Calculado desde lo que debes hoy ({formatear(p.saldo)}) con {deuda.tasa_anual}% anual
+        {p.frecuencia !== 'mensual' && ` (${Math.round((deuda.tasa_anual / PAGOS_POR_ANIO[p.frecuencia]) * 1000) / 1000}% por pago)`}.
+      </p>
+      {t.nuncaTermina ? (
+        <Aviso>Con esta cuota el capital no baja: cada pago se va completo en intereses. Abona a capital para que la deuda empiece a bajar.</Aviso>
+      ) : (
+        <div className="grid grid-cols-3 gap-3 text-center">
+          <div className="rounded-xl bg-gray-50 p-3"><p className="text-xs text-suave">Pagos que faltan</p><p className="font-bold text-lg">{t.filas.length}</p></div>
+          <div className="rounded-xl bg-gray-50 p-3"><p className="text-xs text-suave">Intereses que faltan</p><p className="font-bold text-lg text-peligro">{formatear(t.totalIntereses)}</p></div>
+          <div className="rounded-xl bg-gray-50 p-3"><p className="text-xs text-suave">Total a pagar</p><p className="font-bold text-lg">{formatear(t.totalPagado)}</p></div>
+        </div>
+      )}
+      <div className="max-h-[50vh] overflow-auto rounded-xl border border-borde">
+        <table className="w-full text-sm tabular-nums">
+          <thead className="sticky top-0 bg-white text-xs text-suave">
+            <tr className="border-b border-borde">
+              <th className="text-left font-semibold px-3 py-2">#</th>
+              <th className="text-left font-semibold px-3 py-2">Fecha</th>
+              <th className="text-right font-semibold px-3 py-2">Cuota</th>
+              <th className="text-right font-semibold px-3 py-2">Interés</th>
+              <th className="text-right font-semibold px-3 py-2">Capital</th>
+              <th className="text-right font-semibold px-3 py-2">Queda</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-borde">
+            {t.filas.map((f, k) => (
+              <tr key={f.n}>
+                <td className="px-3 py-1.5 text-suave">{f.n}</td>
+                <td className="px-3 py-1.5 whitespace-nowrap">{corta(fechas[k])}</td>
+                <td className="px-3 py-1.5 text-right font-semibold">{formatear(f.cuota)}</td>
+                <td className="px-3 py-1.5 text-right text-peligro">{formatear(f.interes)}</td>
+                <td className="px-3 py-1.5 text-right text-marca">{formatear(f.capital)}</td>
+                <td className="px-3 py-1.5 text-right">{formatear(f.saldo)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-suave">Si pagas a tiempo y sin abonos extra. Cada abono extra a capital baja los intereses de los pagos que siguen.</p>
     </div>
   )
 }

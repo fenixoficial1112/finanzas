@@ -1,6 +1,7 @@
 # Fabrica el instalador de FENIX APP para Windows (.exe) en una máquina Windows de GitHub.
 # - Cada cambio en main: el instalador queda en la pestaña "Actions" → la ejecución → "Artifacts".
-# - Al crear una etiqueta v1.0.0, v1.1.0…: además se publica en "Releases" para descargarlo fácil.
+# - Al crear una etiqueta v1.1.0, v1.2.0…: se publica en "Releases" junto con latest.yml, que es lo
+#   que lee el programa instalado para actualizarse solo.
 name: App de escritorio (Windows)
 
 on:
@@ -25,8 +26,18 @@ jobs:
 
       - run: npm ci
 
+      - name: Probar la base de datos
+        run: npm run probar:bd
+
       - name: Fabricar el instalador
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: npm run dist:win
+
+      - name: Fabricar y publicar la versión en Releases
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npm run publicar:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Guardar el instalador
         uses: actions/upload-artifact@v4
@@ -34,10 +45,3 @@ jobs:
           name: FENIX-APP-Windows
           path: release/*.exe
           if-no-files-found: error
-
-      - name: Publicar en Releases (solo con etiqueta v*)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/*.exe
-          generate_release_notes: true

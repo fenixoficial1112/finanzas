@@ -2,6 +2,7 @@ import { BrowserRouter, HashRouter, Route, Routes } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import AppLayout from './layout/AppLayout'
 import { iniciarBD } from './lib/bd'
+import { procesarRecurrentesAutomaticos } from './lib/datos'
 import Ajustes from './pages/Ajustes'
 import Asesor from './pages/Asesor'
 import Cuentas from './pages/Cuentas'
@@ -13,6 +14,7 @@ import MetaDiaria from './pages/MetaDiaria'
 import Metas from './pages/Metas'
 import Movimientos from './pages/Movimientos'
 import Presupuesto from './pages/Presupuesto'
+import Recurrentes from './pages/Recurrentes'
 import Proximamente from './pages/Proximamente'
 import Reportes from './pages/Reportes'
 import Vehiculo from './pages/Vehiculo'
@@ -25,6 +27,7 @@ export default function App() {
 
   useEffect(() => {
     iniciarBD()
+      .then(() => procesarRecurrentesAutomaticos())
       .then(() => setEstado('lista'))
       .catch((e: unknown) => setEstado(e instanceof Error ? e.message : String(e)))
   }, [])
@@ -55,6 +58,7 @@ function Rutas() {
           <Route path="meta" element={<MetaDiaria />} />
           <Route path="movimientos" element={<Movimientos />} />
           <Route path="cuentas" element={<Cuentas />} />
+          <Route path="recurrentes" element={<Recurrentes />} />
           <Route path="ajustes" element={<Ajustes />} />
           <Route path="jornadas" element={<Jornadas />} />
           <Route path="vehiculo" element={<Vehiculo />} />

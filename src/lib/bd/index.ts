@@ -5,12 +5,14 @@ import initSqlJs, { type Database, type SqlValue } from 'sql.js'
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 import { escritorio } from '../escritorio'
 import esquemaV1 from './esquema.sql?raw'
+import esquemaV2 from './esquema2.sql?raw'
+import esquemaV3 from './esquema3.sql?raw'
 
 /** Migraciones en orden: la posición + 1 es la versión (PRAGMA user_version). */
-const MIGRACIONES: string[] = [esquemaV1]
+const MIGRACIONES: string[] = [esquemaV1, esquemaV2, esquemaV3]
 
 /** Columnas guardadas como 0/1 que la app usa como true/false. */
-const BOOLEANAS = new Set(['archivada', 'activa', 'tanque_lleno', 'incluir_en_meta', 'pagada'])
+const BOOLEANAS = new Set(['archivada', 'activa', 'tanque_lleno', 'incluir_en_meta', 'pagada', 'automatico'])
 
 let db: Database | null = null
 let enTransaccion = 0

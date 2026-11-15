@@ -5,6 +5,7 @@ const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
 const asesor = require('./asesor.cjs')
+const actualizador = require('./actualizador.cjs')
 
 const MAX_RESPALDOS = 30
 let ventana = null
@@ -28,6 +29,7 @@ if (!app.requestSingleInstanceLock()) {
   })
   app.whenReady().then(() => {
     crearVentana()
+    actualizador.iniciar(() => ventana)
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) crearVentana() })
   })
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

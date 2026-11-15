@@ -7,6 +7,7 @@ import {
 import { useDatos } from '../lib/useDatos'
 import { esperarGuardado, exportarBytes, restaurarBytes } from '../lib/bd'
 import { escritorio } from '../lib/escritorio'
+import { useActualizacion } from '../lib/useActualizacion'
 
 export default function Ajustes() {
   return (
@@ -17,6 +18,7 @@ export default function Ajustes() {
       <Categorias />
       <AsesorIA />
       <TusDatos />
+      <Programa />
     </div>
   )
 }
@@ -30,7 +32,7 @@ function TasaDolar() {
   async function guardar(e: FormEvent) {
     e.preventDefault()
     const n = Number(mostrado.replace(',', '.'))
-    if (!(n > 0 && n < 1000)) return setMsg({ tipo: 'error', texto: 'Escribe una tasa válida, por ejemplo 63.50' })
+    if (!(n > 0 && n < 1000)) return setMsg({ tipo: 'error', texto: 'Escribe una tasa válida, por ejemplo 58.80' })
     try {
       await guardarTasaUSD(n)
       setMsg({ tipo: 'ok', texto: 'Tasa guardada.' })
@@ -50,7 +52,7 @@ function TasaDolar() {
       <form onSubmit={guardar} className="flex flex-wrap items-end gap-3">
         <div className="w-56">
           <Campo etiqueta="RD$ por cada US$1">
-            <input inputMode="decimal" value={mostrado} onChange={(e) => setValor(e.target.value)} className={inputCls} placeholder="Ej.: 63.50" />
+            <input inputMode="decimal" value={mostrado} onChange={(e) => setValor(e.target.value)} className={inputCls} placeholder="Ej.: 58.80" />
           </Campo>
         </div>
         <button className={btnPrincipal}>Guardar tasa</button>
@@ -157,7 +159,7 @@ function Plataformas() {
       <div>
         <h2 className="text-lg font-semibold">Apps de transporte</h2>
         <p className="text-sm text-suave">
-          El % de comisión se usa para sugerir la comisión al registrar una jornada. Pon el que te cobra cada app; siempre puedes corregirlo en cada jornada.
+          El % de comisión se usa para sugerir la comisión al registrar una jornada. Revisa en cada app cuánto te cobra hoy (cambia con el tiempo) y ponlo aquí; siempre puedes corregirlo en cada jornada.
         </p>
       </div>
       {(error || plats.error) && <Aviso>{error ?? plats.error}</Aviso>}
@@ -323,6 +325,36 @@ function AsesorIA() {
         </form>
       )}
       {msg && <Aviso tipo={msg.tipo}>{msg.texto}</Aviso>}
+    </section>
+  )
+}
+
+function Programa() {
+  const a = useActualizacion()
+  if (!escritorio || !a) return null
+  const textos: Record<string, string> = {
+    'sin-revisar': 'Todavía no se ha revisado si hay versiones nuevas.',
+    desarrollo: 'Modo desarrollo: las actualizaciones automáticas solo funcionan en el programa instalado.',
+    revisando: 'Buscando versiones nuevas…',
+    'al-dia': 'Tienes la versión más reciente.',
+    descargando: `Descargando la versión ${a.nueva ?? 'nueva'}… ${a.progreso ?? 0}%`,
+    lista: `La versión ${a.nueva} está lista: se instala al cerrar el programa.`,
+    error: 'No se pudo revisar si hay versiones nuevas (¿hay internet?).',
+  }
+  return (
+    <section className={`${tarjeta} p-6 space-y-3`}>
+      <h2 className="text-lg font-semibold">Programa</h2>
+      <p className="text-sm">FENIX APP versión <b>{a.version}</b></p>
+      <p className="text-sm text-suave">{textos[a.estado]} El programa busca actualizaciones solo al abrirse y las instala al cerrarse; tus datos no se tocan.</p>
+      <div className="flex flex-wrap gap-2">
+        {a.estado === 'lista' ? (
+          <button className={btnPrincipal} onClick={() => escritorio!.app.instalarActualizacion()}>Reiniciar y actualizar</button>
+        ) : (
+          <button className={btnSecundario} disabled={a.estado === 'revisando' || a.estado === 'descargando'} onClick={() => escritorio!.app.buscarActualizacion()}>
+            Buscar actualizaciones
+          </button>
+        )}
+      </div>
     </section>
   )
 }

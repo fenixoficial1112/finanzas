@@ -142,7 +142,7 @@ export function FormCarga({ vehiculoId, carga, kmActual, cuentas, onListo }: {
           onChange={(e) => { setGalones(e.target.value); recalcular(e.target.value, precio) }} />
       </Campo>
       <Campo etiqueta="Precio por galón (RD$)">
-        <input inputMode="decimal" value={precio} className={inputCls} placeholder="Ej.: 290.10"
+        <input inputMode="decimal" value={precio} className={inputCls} placeholder="Ej.: 317.50"
           onChange={(e) => { setPrecio(e.target.value); recalcular(galones, e.target.value) }} />
       </Campo>
       <Campo etiqueta="Total pagado (RD$)">

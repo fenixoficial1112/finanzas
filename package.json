@@ -11,10 +11,12 @@
     "escritorio": "vite build --mode escritorio && electron .",
     "build:escritorio": "vite build --mode escritorio",
     "dist:win": "vite build --mode escritorio && electron-builder --win nsis --x64 --publish never",
-    "probar:bd": "node scripts/probar-esquema.cjs"
+    "probar:bd": "node scripts/probar-esquema.cjs",
+    "publicar:win": "vite build --mode escritorio && electron-builder --win nsis --x64 --publish always"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
+    "electron-updater": "^6.8.11",
     "sql.js": "^1.13.0"
   },
   "devDependencies": {
@@ -72,6 +74,14 @@
         "dir"
       ],
       "icon": "build/icon.png"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "fenixoficial1112",
+        "repo": "finanzas",
+        "releaseType": "release"
+      }
+    ]
   }
 }

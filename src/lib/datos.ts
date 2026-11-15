@@ -3,6 +3,8 @@
 import { consultar, ejecutar, nuevoId, transaccion, uno } from './bd'
 import type { Moneda } from './dinero'
 import { escritorio } from './escritorio'
+import { hoyISO } from './fechas'
+import { siguienteFecha, type FrecuenciaRecurrente } from './recurrentes'
 
 export type TipoCuenta = 'efectivo' | 'banco' | 'tarjeta' | 'ahorro' | 'inversion'
 export type TipoMovimiento = 'ingreso' | 'gasto' | 'transferencia'
@@ -42,10 +44,11 @@ export interface Movimiento {
   pago_deuda_id?: string | null
   aporte_meta_id?: string | null
   inversion_id?: string | null
+  recurrente_id?: string | null
   origen?: string | null
 }
 
-export type NuevoMovimiento = Omit<Movimiento, 'id' | 'jornada_id' | 'carga_id' | 'mantenimiento_id' | 'pago_deuda_id' | 'aporte_meta_id' | 'inversion_id' | 'origen'>
+export type NuevoMovimiento = Omit<Movimiento, 'id' | 'jornada_id' | 'carga_id' | 'mantenimiento_id' | 'pago_deuda_id' | 'aporte_meta_id' | 'inversion_id' | 'recurrente_id' | 'origen'>
 
 export const NOMBRES_TIPO_CUENTA: Record<TipoCuenta, string> = {
   efectivo: 'Efectivo',
@@ -133,7 +136,7 @@ export interface FiltroMovimientos {
 }
 
 const COLUMNAS_MOV = `id, tipo, monto_centavos, cuenta_id, cuenta_destino_id, monto_destino_centavos, categoria_id, fecha, nota,
-  jornada_id, carga_id, mantenimiento_id, pago_deuda_id, aporte_meta_id, inversion_id, origen`
+  jornada_id, carga_id, mantenimiento_id, pago_deuda_id, aporte_meta_id, inversion_id, recurrente_id, origen`
 
 export async function listarMovimientos(f: FiltroMovimientos): Promise<Movimiento[]> {
   const cond = ['fecha >= ?', 'fecha <= ?']
@@ -561,6 +564,16 @@ export interface Deuda {
   limite_credito_centavos: number | null
   dia_corte: number | null
   cuenta_tarjeta_id: string | null
+  sistema: SistemaPrestamo
+  monto_prestado_centavos: number | null
+}
+
+export type SistemaPrestamo = 'cuota_fija' | 'capital_fijo' | 'interes_fijo' | 'solo_interes'
+export const NOMBRES_SISTEMA: Record<SistemaPrestamo, { nombre: string; detalle: string }> = {
+  cuota_fija: { nombre: 'Cuota fija, el interés baja', detalle: 'Pagas siempre lo mismo; el interés se cobra sobre lo que debes, así que cada pago lleva menos interés y más capital. Así son los bancos y cooperativas.' },
+  capital_fijo: { nombre: 'Abono fijo a capital, la cuota baja', detalle: 'Abonas siempre lo mismo a capital y le sumas el interés de lo que debes; cada cuota es más pequeña que la anterior.' },
+  interes_fijo: { nombre: 'Interés fijo sobre lo prestado', detalle: 'El interés se calcula siempre sobre lo que te prestaron y no baja aunque debas menos. Es común con prestamistas.' },
+  solo_interes: { nombre: 'Solo pago réditos', detalle: 'Cada pago cubre solo el interés; el capital sigue igual hasta que lo abones aparte.' },
 }
 
 export type FrecuenciaPago = 'mensual' | 'quincenal' | 'semanal' | 'diaria'
@@ -594,7 +607,7 @@ export async function listarDeudas(): Promise<DeudaConEstado[]> {
   return consultar<DeudaConEstado>(
     `SELECT d.id, d.nombre, d.tipo, d.acreedor, d.saldo_inicial_centavos, d.tasa_anual, d.cuota_centavos, d.dia_pago,
             d.incluir_en_meta, d.pagada, d.creado_en, d.frecuencia, d.dia_pago_2, d.dia_semana, d.limite_credito_centavos,
-            d.dia_corte, d.cuenta_tarjeta_id,
+            d.dia_corte, d.cuenta_tarjeta_id, d.sistema, d.monto_prestado_centavos,
             e.saldo_centavos, e.pagado_centavos, e.intereses_pagados_centavos, e.cargos_centavos, e.ultimo_pago
      FROM deudas d JOIN deudas_estado e ON e.deuda_id = d.id
      ORDER BY d.creado_en`,
@@ -969,4 +982,91 @@ export async function operarInversion(inv: InversionConValor, op: OperacionInver
       })
     }
   })
+}
+
+// ---------- Movimientos recurrentes ----------
+export interface Recurrente {
+  id: string
+  nombre: string
+  tipo: TipoMovimiento
+  monto_centavos: number
+  cuenta_id: string
+  cuenta_destino_id: string | null
+  categoria_id: string | null
+  frecuencia: FrecuenciaRecurrente
+  dia_mes: number | null
+  dia_mes_2: number | null
+  dia_semana: number | null
+  mes: number | null
+  proxima_fecha: string
+  hasta: string | null
+  automatico: boolean
+  activa: boolean
+}
+
+const COLUMNAS_REC = `id, nombre, tipo, monto_centavos, cuenta_id, cuenta_destino_id, categoria_id, frecuencia, dia_mes, dia_mes_2,
+  dia_semana, mes, proxima_fecha, hasta, automatico, activa`
+
+export async function listarRecurrentes(): Promise<Recurrente[]> {
+  return consultar<Recurrente>(`SELECT ${COLUMNAS_REC} FROM recurrentes ORDER BY activa DESC, proxima_fecha`)
+}
+
+export async function guardarRecurrente(r: Omit<Recurrente, 'id' | 'activa'>, id?: string) {
+  await guardarEn('recurrentes', { ...r }, id)
+}
+
+export async function borrarRecurrente(id: string) {
+  await borrar('recurrentes', id)
+}
+
+export async function pausarRecurrente(id: string, activa: boolean) {
+  await actualizar('recurrentes', id, { activa })
+}
+
+/** Siguiente fecha (o la desactiva si ya pasó la fecha final). */
+async function avanzarRecurrente(r: Recurrente) {
+  const siguiente = siguienteFecha(r, r.proxima_fecha)
+  if (r.hasta && siguiente > r.hasta) await actualizar('recurrentes', r.id, { proxima_fecha: siguiente, activa: false })
+  else await actualizar('recurrentes', r.id, { proxima_fecha: siguiente })
+}
+
+/** Anota el movimiento de esta ocurrencia (con el monto indicado, por si cambió) y pasa a la siguiente. */
+export async function registrarRecurrente(r: Recurrente, monto_centavos = r.monto_centavos) {
+  await transaccion(async () => {
+    await insertar('movimientos', {
+      tipo: r.tipo, monto_centavos, cuenta_id: r.cuenta_id, cuenta_destino_id: r.tipo === 'transferencia' ? r.cuenta_destino_id : null,
+      categoria_id: r.tipo === 'transferencia' ? null : r.categoria_id, fecha: r.proxima_fecha, nota: r.nombre, recurrente_id: r.id,
+    })
+    await avanzarRecurrente(r)
+  })
+}
+
+/** Salta esta ocurrencia sin anotar nada. */
+export async function saltarRecurrente(r: Recurrente) {
+  await avanzarRecurrente(r)
+}
+
+/** Los que ya tocaron y esperan que el usuario los confirme. */
+export async function recurrentesPendientes(): Promise<Recurrente[]> {
+  return consultar<Recurrente>(
+    `SELECT ${COLUMNAS_REC} FROM recurrentes WHERE activa = 1 AND automatico = 0 AND proxima_fecha <= ? ORDER BY proxima_fecha`,
+    [hoyISO()],
+  )
+}
+
+/** Anota todas las ocurrencias automáticas que ya tocaron (se llama al abrir la app). Devuelve cuántas. */
+export async function procesarRecurrentesAutomaticos(): Promise<number> {
+  const hoy = hoyISO()
+  let total = 0
+  for (let vuelta = 0; vuelta < 400; vuelta++) {
+    const vencidos = consultar<Recurrente>(
+      `SELECT ${COLUMNAS_REC} FROM recurrentes WHERE activa = 1 AND automatico = 1 AND proxima_fecha <= ?`, [hoy],
+    )
+    if (!vencidos.length) break
+    for (const r of vencidos) {
+      await registrarRecurrente(r)
+      total++
+    }
+  }
+  return total
 }
