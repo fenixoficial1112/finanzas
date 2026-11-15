@@ -54,7 +54,13 @@ export const NOMBRES_TIPO_CUENTA: Record<TipoCuenta, string> = {
 }
 
 function revisar<T>(r: { data: T | null; error: { message: string } | null }): T {
-  if (r.error) throw new Error(r.error.message)
+  if (r.error) {
+    // Tabla inexistente: la base de datos del proyecto todavía no está preparada.
+    if (/schema cache|does not exist/i.test(r.error.message)) {
+      throw new Error('Tu base de datos todavía no está preparada. En Supabase abre SQL Editor, pega el archivo supabase/instalar_todo.sql del proyecto y dale a Run. Luego vuelve a abrir FENIX APP.')
+    }
+    throw new Error(r.error.message)
+  }
   return r.data as T
 }
 

@@ -25,9 +25,10 @@ Tus datos se guardan en **tu propio proyecto de Supabase**, en el plan gratuito
 Supabase lo pausa: se reactiva con un clic en su panel.
 
 1. Crea una cuenta y un proyecto en **supabase.com** (elige la región más cercana, por ejemplo *East US*).
-2. Abre **SQL Editor** y ejecuta, **en orden**, cada archivo de `supabase/migrations/`
-   (`001_esquema_inicial.sql`, `002_saldos.sql`, … hasta el número más alto).
-   Cuando lleguen actualizaciones, ejecuta solo los archivos nuevos.
+2. Abre **SQL Editor → New query**, pega **todo** el archivo `supabase/instalar_todo.sql`
+   y dale a **Run**. Crea todas las tablas de una vez (si ya te habías registrado en la app,
+   también completa tu cuenta).
+   - Actualizaciones futuras: ejecuta solo los archivos nuevos de `supabase/migrations/`.
 3. En **Authentication → URL Configuration**, agrega en **Redirect URLs**:
    - `fenixapp://auth` (para la app de Windows)
    - `http://localhost:5173` (solo si vas a probarla en modo desarrollo)

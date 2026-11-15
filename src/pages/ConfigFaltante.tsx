@@ -30,7 +30,7 @@ export default function ConfigFaltante() {
         </div>
         <ol className="list-decimal pl-5 space-y-2 text-[15px] leading-relaxed">
           <li>Crea un proyecto gratis en <b>supabase.com</b>.</li>
-          <li>En <b>SQL Editor</b>, ejecuta en orden los archivos de <code className="bg-gray-100 px-1 rounded">supabase/migrations/</code> del proyecto.</li>
+          <li>En <b>SQL Editor</b>, pega todo el archivo <code className="bg-gray-100 px-1 rounded">supabase/instalar_todo.sql</code> del proyecto y dale a <b>Run</b>.</li>
           <li>En <b>Project Settings → API</b>, copia la <b>Project URL</b> y la clave pública <b>anon</b> (o <i>publishable</i>) y pégalas aquí.</li>
         </ol>
         <form onSubmit={guardar} className="space-y-4">
