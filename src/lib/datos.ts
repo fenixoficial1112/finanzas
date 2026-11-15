@@ -527,6 +527,7 @@ export interface Deuda {
   dia_pago: number | null
   incluir_en_meta: boolean
   pagada: boolean
+  creado_en?: string
 }
 
 export interface DeudaConEstado extends Deuda {
@@ -550,7 +551,7 @@ export interface PagoDeuda {
 
 export async function listarDeudas(): Promise<DeudaConEstado[]> {
   const [ds, est] = await Promise.all([
-    supabase.from('deudas').select('id,nombre,tipo,acreedor,saldo_inicial_centavos,tasa_anual,cuota_centavos,dia_pago,incluir_en_meta,pagada').order('creado_en'),
+    supabase.from('deudas').select('id,nombre,tipo,acreedor,saldo_inicial_centavos,tasa_anual,cuota_centavos,dia_pago,incluir_en_meta,pagada,creado_en').order('creado_en'),
     supabase.from('deudas_estado').select('*'),
   ])
   const estados = new Map((revisar(est) as Record<string, unknown>[]).map((e) => [e.deuda_id as string, e]))
@@ -570,7 +571,7 @@ export async function listarDeudas(): Promise<DeudaConEstado[]> {
   })
 }
 
-export async function guardarDeuda(d: Omit<Deuda, 'id' | 'pagada'>, id?: string) {
+export async function guardarDeuda(d: Omit<Deuda, 'id' | 'pagada' | 'creado_en'>, id?: string) {
   if (id) revisar(await supabase.from('deudas').update(d).eq('id', id))
   else revisar(await supabase.from('deudas').insert(d))
 }
@@ -932,4 +933,12 @@ export async function operarInversion(inv: InversionConValor, op: OperacionInver
     }
   }
   revisar(await supabase.from('movimientos').insert(fila))
+}
+
+/** Todos los pagos y cargos de deudas desde una fecha (para reportes). */
+export async function listarPagosDeudaDesde(desde: string): Promise<PagoDeuda[]> {
+  const filas = revisar(
+    await supabase.from('pagos_deuda').select('id,deuda_id,tipo,fecha,monto_centavos,interes_centavos,cuenta_id,nota').gte('fecha', desde),
+  ) as PagoDeuda[]
+  return filas.map((p) => ({ ...p, monto_centavos: Number(p.monto_centavos), interes_centavos: Number(p.interes_centavos) }))
 }

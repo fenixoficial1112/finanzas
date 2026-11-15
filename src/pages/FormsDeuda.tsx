@@ -54,7 +54,7 @@ export function FormDeuda({ deuda, onListo }: { deuda: DeudaConEstado | null; on
       await guardarDeuda({
         nombre: nombre.trim(), tipo, acreedor: acreedor.trim() || null, saldo_inicial_centavos: s,
         tasa_anual: Math.round(tasaAnual * 100) / 100, cuota_centavos: c, dia_pago: dia ? Number(dia) : null, incluir_en_meta: enMeta,
-      } satisfies Omit<Deuda, 'id' | 'pagada'>, deuda?.id)
+      } satisfies Omit<Deuda, 'id' | 'pagada' | 'creado_en'>, deuda?.id)
       onListo()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

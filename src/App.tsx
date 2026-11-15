@@ -17,6 +17,7 @@ import Movimientos from './pages/Movimientos'
 import NuevaContrasena from './pages/NuevaContrasena'
 import Presupuesto from './pages/Presupuesto'
 import Proximamente from './pages/Proximamente'
+import Reportes from './pages/Reportes'
 import Vehiculo from './pages/Vehiculo'
 
 export default function App() {
@@ -49,7 +50,7 @@ function Rutas() {
           <Route path="presupuesto" element={<Presupuesto />} />
           <Route path="metas" element={<Metas />} />
           <Route path="inversiones" element={<Inversiones />} />
-          <Route path="reportes" element={<Proximamente titulo="Reportes" fase={10} />} />
+          <Route path="reportes" element={<Reportes />} />
           <Route path="*" element={<Proximamente titulo="Página no encontrada" fase={0} />} />
         </Route>
       </Routes>

@@ -94,4 +94,5 @@ escritorio y en el menú Inicio, en su propia ventana):
 | 7 | Presupuesto y alertas | ✅ |
 | 8 | Metas corto / mediano / largo plazo | ✅ |
 | 9 | Inversiones en RD$ y US$ | ✅ |
-| 10 | Reportes | ⏳ |
+| 10 | Reportes con gráficos | ✅ |
+| 11 | Tarjetas de crédito, pagos quincenales/semanales/diarios y préstamos callejeros | ⏳ |
