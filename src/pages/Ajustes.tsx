@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from 'react'
-import { Aviso, Campo, Encabezado, btnPrincipal, inputCls, tarjeta } from '../components/ui'
+import { Aviso, Campo, Encabezado, btnPrincipal, btnSecundario, inputCls, tarjeta } from '../components/ui'
 import {
   actualizarPlataforma, borrarCategoria, crearCategoria, crearPlataforma, guardarTasaUSD, listarCategorias, listarPlataformas,
   obtenerTasaUSD, type Categoria, type Plataforma,
 } from '../lib/datos'
 import { useDatos } from '../lib/useDatos'
-import { infoConexion, olvidarConfigSupabase } from '../lib/supabase'
+import { esperarGuardado, exportarBytes, restaurarBytes } from '../lib/bd'
+import { escritorio } from '../lib/escritorio'
 
 export default function Ajustes() {
   return (
@@ -14,7 +15,8 @@ export default function Ajustes() {
       <TasaDolar />
       <Plataformas />
       <Categorias />
-      <Conexion />
+      <AsesorIA />
+      <TusDatos />
     </div>
   )
 }
@@ -207,22 +209,120 @@ function FilaPlataforma({ p, onGuardar }: { p: Plataforma; onGuardar: (c: Partia
   )
 }
 
-function Conexion() {
-  const { url, cambiable } = infoConexion()
+function TusDatos() {
+  const ubicacion = useDatos(async () => (escritorio ? escritorio.bd.ubicacion() : null), [])
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null)
+
+  async function exportar() {
+    setMsg(null)
+    try {
+      await esperarGuardado()
+      const bytes = exportarBytes()
+      if (escritorio) {
+        const ruta = await escritorio.bd.exportar(bytes)
+        if (ruta) setMsg({ tipo: 'ok', texto: `Copia guardada en ${ruta}` })
+      } else {
+        const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/x-sqlite3' }))
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `fenix-copia-${new Date().toISOString().slice(0, 10)}.db`
+        a.click()
+        URL.revokeObjectURL(url)
+      }
+    } catch (e) {
+      setMsg({ tipo: 'error', texto: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  async function restaurar() {
+    setMsg(null)
+    if (!escritorio) return setMsg({ tipo: 'error', texto: 'Restaurar copias está disponible en el programa de Windows.' })
+    if (!confirm('Vas a reemplazar TODOS tus datos actuales por los de la copia. ¿Seguro? (Antes de hacerlo te recomendamos exportar una copia de lo actual.)')) return
+    try {
+      const bytes = await escritorio.bd.importar()
+      if (!bytes) return
+      await restaurarBytes(bytes)
+      window.location.reload()
+    } catch (e) {
+      setMsg({ tipo: 'error', texto: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
   return (
-    <section className={`${tarjeta} p-6 space-y-3`}>
-      <h2 className="text-lg font-semibold">Conexión con la nube</h2>
-      <p className="text-sm text-suave">Tus datos se guardan en tu proyecto de Supabase: <b className="text-tinta break-all">{url}</b></p>
-      {cambiable && (
-        <button
-          className="text-sm font-semibold text-peligro cursor-pointer"
-          onClick={() => {
-            if (confirm('¿Conectar la app a otro proyecto de Supabase? Se cerrará tu sesión; tus datos siguen guardados en el proyecto actual.')) olvidarConfigSupabase()
-          }}
-        >
-          Cambiar de proyecto
-        </button>
+    <section className={`${tarjeta} p-6 space-y-4`}>
+      <div>
+        <h2 className="text-lg font-semibold">Tus datos</h2>
+        <p className="text-sm text-suave">Todo se guarda en un archivo en tu disco duro, no en internet. Se guarda solo cada vez que haces un cambio.</p>
+      </div>
+      {ubicacion.datos && (
+        <div className="rounded-xl bg-gray-50 border border-borde p-4 space-y-1 text-sm">
+          <p>Archivo: <b className="break-all">{ubicacion.datos.archivo}</b></p>
+          <p className="text-suave">
+            Copias automáticas: una por día, se guardan las últimas 30 ({ubicacion.datos.cantidadRespaldos} ahora) en <span className="break-all">{ubicacion.datos.respaldos}</span>
+          </p>
+        </div>
       )}
+      <div className="flex flex-wrap gap-2">
+        <button className={btnPrincipal} onClick={exportar}>Guardar una copia de seguridad…</button>
+        {escritorio && <button className={btnSecundario} onClick={restaurar}>Restaurar desde una copia…</button>}
+        {escritorio && <button className={btnSecundario} onClick={() => escritorio!.bd.abrirCarpeta()}>Abrir la carpeta de datos</button>}
+      </div>
+      <p className="text-xs text-suave">
+        Consejo: guarda una copia de vez en cuando en un USB o en tu Google Drive. Si la PC se daña o la cambias, con esa copia recuperas todo.
+      </p>
+      {msg && <Aviso tipo={msg.tipo}>{msg.texto}</Aviso>}
+    </section>
+  )
+}
+
+function AsesorIA() {
+  const estado = useDatos(async () => (escritorio ? escritorio.asesor.estado() : null), [])
+  const [clave, setClave] = useState('')
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null)
+
+  if (!escritorio) return null
+
+  async function guardar(e: FormEvent) {
+    e.preventDefault()
+    if (!clave.trim().startsWith('sk-ant-')) return setMsg({ tipo: 'error', texto: 'La clave de Anthropic empieza con "sk-ant-".' })
+    try {
+      await escritorio!.asesor.guardarClave(clave.trim())
+      setClave('')
+      setMsg({ tipo: 'ok', texto: 'Clave guardada en esta PC. Ya puedes usar el asesor.' })
+      estado.recargar()
+    } catch (err) {
+      setMsg({ tipo: 'error', texto: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
+  return (
+    <section className={`${tarjeta} p-6 space-y-4`}>
+      <div>
+        <h2 className="text-lg font-semibold">Asesor IA</h2>
+        <p className="text-sm text-suave">
+          El asesor usa Claude, de Anthropic. Necesita internet y una clave de API de console.anthropic.com (se paga por uso: centavos por pregunta).
+          Pon un límite de gasto mensual en tu cuenta de Anthropic.
+        </p>
+      </div>
+      {estado.datos?.tieneClave ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Aviso tipo="ok">Clave configurada{estado.datos.cifrado ? ' y guardada cifrada en esta PC' : ''}.</Aviso>
+          <button className="text-sm font-semibold text-peligro cursor-pointer"
+            onClick={async () => { await escritorio!.asesor.borrarClave(); estado.recargar() }}>
+            Quitar clave
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={guardar} className="flex flex-wrap items-end gap-3">
+          <div className="flex-1 min-w-64">
+            <Campo etiqueta="Clave de API de Anthropic">
+              <input type="password" autoComplete="off" value={clave} onChange={(e) => setClave(e.target.value)} className={inputCls} placeholder="sk-ant-…" />
+            </Campo>
+          </div>
+          <button className={btnPrincipal}>Guardar clave</button>
+        </form>
+      )}
+      {msg && <Aviso tipo={msg.tipo}>{msg.texto}</Aviso>}
     </section>
   )
 }

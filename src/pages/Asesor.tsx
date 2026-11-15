@@ -6,6 +6,8 @@ import {
 } from '../lib/datos'
 import { construirContexto } from '../lib/contextoIA'
 import { useDatos } from '../lib/useDatos'
+import { escritorio } from '../lib/escritorio'
+import { Link } from 'react-router-dom'
 
 const SUGERENCIAS = [
   '¿Cuánto necesito hacer hoy en InDrive para cumplir con todo?',
@@ -19,6 +21,7 @@ const SUGERENCIAS = [
 
 export default function Asesor() {
   const conversaciones = useDatos(listarConversaciones, [])
+  const estadoClave = useDatos(async () => (escritorio ? escritorio.asesor.estado() : null), [])
   const [actual, setActual] = useState<string | null>(null)
   const [mensajes, setMensajes] = useState<MensajeIA[]>([])
   const [texto, setTexto] = useState('')
@@ -155,6 +158,10 @@ export default function Asesor() {
         </div>
 
         <form onSubmit={alEnviar} className="border-t border-borde p-4 space-y-2">
+          {!escritorio && <Aviso>El asesor IA funciona en el programa de Windows de FENIX APP.</Aviso>}
+          {escritorio && estadoClave.datos && !estadoClave.datos.tieneClave && (
+            <Aviso>Para usar el asesor, pon tu clave de Anthropic en <Link to="/ajustes" className="underline font-semibold">Ajustes → Asesor IA</Link>.</Aviso>
+          )}
           {error && <Aviso>{error}</Aviso>}
           <div className="flex gap-2 items-end">
             <label htmlFor="pregunta" className="sr-only">Escribe tu pregunta</label>

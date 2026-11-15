@@ -1,20 +1,17 @@
 import { BrowserRouter, HashRouter, Route, Routes } from 'react-router-dom'
-import { useAuth } from './auth/AuthProvider'
+import { useEffect, useState } from 'react'
 import AppLayout from './layout/AppLayout'
-import { supabaseConfigurado } from './lib/supabase'
+import { iniciarBD } from './lib/bd'
 import Ajustes from './pages/Ajustes'
 import Asesor from './pages/Asesor'
-import ConfigFaltante from './pages/ConfigFaltante'
 import Cuentas from './pages/Cuentas'
 import Deudas from './pages/Deudas'
 import Inicio from './pages/Inicio'
 import Inversiones from './pages/Inversiones'
 import Jornadas from './pages/Jornadas'
-import Login from './pages/Login'
 import MetaDiaria from './pages/MetaDiaria'
 import Metas from './pages/Metas'
 import Movimientos from './pages/Movimientos'
-import NuevaContrasena from './pages/NuevaContrasena'
 import Presupuesto from './pages/Presupuesto'
 import Proximamente from './pages/Proximamente'
 import Reportes from './pages/Reportes'
@@ -24,19 +21,32 @@ import Vehiculo from './pages/Vehiculo'
 const Router = window.location.protocol === 'file:' ? HashRouter : BrowserRouter
 
 export default function App() {
-  if (!supabaseConfigurado) return <ConfigFaltante />
+  const [estado, setEstado] = useState<'abriendo' | 'lista' | string>('abriendo')
+
+  useEffect(() => {
+    iniciarBD()
+      .then(() => setEstado('lista'))
+      .catch((e: unknown) => setEstado(e instanceof Error ? e.message : String(e)))
+  }, [])
+
+  if (estado === 'abriendo') {
+    return <div className="min-h-screen grid place-items-center text-suave">Abriendo tus datos…</div>
+  }
+  if (estado !== 'lista') {
+    return (
+      <main className="min-h-screen grid place-items-center p-6">
+        <div role="alert" className="max-w-lg rounded-2xl border border-red-200 bg-red-50 p-6 space-y-2">
+          <h1 className="text-lg font-bold text-peligro">No se pudieron abrir tus datos</h1>
+          <p className="text-sm">{estado}</p>
+          <p className="text-sm text-suave">Tus copias de seguridad automáticas están en la carpeta de datos de FENIX APP.</p>
+        </div>
+      </main>
+    )
+  }
   return <Rutas />
 }
 
 function Rutas() {
-  const { session, cargando, recuperando } = useAuth()
-
-  if (cargando) {
-    return <div className="min-h-screen grid place-items-center text-suave">Cargando…</div>
-  }
-  if (recuperando) return <NuevaContrasena />
-  if (!session) return <Login />
-
   return (
     <Router>
       <Routes>

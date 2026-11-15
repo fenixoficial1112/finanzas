@@ -1,4 +1,4 @@
-// Cálculos de los reportes. Funciones puras (sin Supabase) para poder probarlas.
+// Cálculos de los reportes. Funciones puras (sin base de datos) para poder probarlas.
 import type { CuentaConSaldo, DeudaConEstado, Movimiento, PagoDeuda } from './datos'
 import { enPesos, type Moneda } from './dinero'
 

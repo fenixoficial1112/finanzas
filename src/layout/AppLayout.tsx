@@ -1,6 +1,4 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { useAuth } from '../auth/AuthProvider'
-import { supabase } from '../lib/supabase'
 import { Logo } from './Logo'
 
 const SECCIONES = [
@@ -23,8 +21,6 @@ const linkCls = ({ isActive }: { isActive: boolean }) =>
   }`
 
 export default function AppLayout() {
-  const { session } = useAuth()
-
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
       <nav aria-label="Menú principal" className="md:w-60 md:min-h-screen bg-tinta text-white p-4 flex flex-col gap-1 md:sticky md:top-0 md:h-screen">
@@ -52,17 +48,7 @@ export default function AppLayout() {
         <div className="hidden md:block mt-auto border-t border-white/10 pt-3">
           <NavLink to="/ajustes" className={linkCls}>Ajustes</NavLink>
         </div>
-        <div className="hidden md:flex flex-col gap-2 pt-2 px-3">
-          <span className="text-xs text-gray-400 truncate" title={session?.user.email}>
-            {session?.user.email}
-          </span>
-          <button
-            onClick={() => supabase.auth.signOut()}
-            className="text-left text-sm text-gray-300 hover:text-white cursor-pointer"
-          >
-            Cerrar sesión
-          </button>
-        </div>
+        <p className="hidden md:block pt-2 px-3 text-xs text-gray-400">Tus datos se guardan en esta PC</p>
       </nav>
 
       <main className="flex-1 min-w-0 p-6 md:p-8">

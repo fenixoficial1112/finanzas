@@ -1,6 +1,8 @@
-// Capa de acceso a datos: las pantallas nunca llaman a Supabase directamente.
+// Capa de acceso a datos: las pantallas nunca tocan la base de datos directamente.
+// Todo se guarda en la base de datos local (SQLite en el disco duro).
+import { consultar, ejecutar, nuevoId, transaccion, uno } from './bd'
 import type { Moneda } from './dinero'
-import { supabase } from './supabase'
+import { escritorio } from './escritorio'
 
 export type TipoCuenta = 'efectivo' | 'banco' | 'tarjeta' | 'ahorro' | 'inversion'
 export type TipoMovimiento = 'ingreso' | 'gasto' | 'transferencia'
@@ -53,58 +55,73 @@ export const NOMBRES_TIPO_CUENTA: Record<TipoCuenta, string> = {
   inversion: 'Inversión',
 }
 
-function revisar<T>(r: { data: T | null; error: { message: string } | null }): T {
-  if (r.error) {
-    // Tabla inexistente: la base de datos del proyecto todavía no está preparada.
-    if (/schema cache|does not exist/i.test(r.error.message)) {
-      throw new Error('Tu base de datos todavía no está preparada. En Supabase abre SQL Editor, pega el archivo supabase/instalar_todo.sql del proyecto y dale a Run. Luego vuelve a abrir FENIX APP.')
-    }
-    throw new Error(r.error.message)
-  }
-  return r.data as T
+// ---------- Ayudas para escribir ----------
+type Fila = Record<string, string | number | boolean | null | undefined>
+
+/** INSERT con las columnas del objeto. Devuelve el id (generado si no viene). */
+async function insertar(tabla: string, fila: Fila): Promise<string> {
+  const id = (fila.id as string | undefined) ?? nuevoId()
+  const datos = { ...fila, id }
+  const cols = Object.keys(datos)
+  await ejecutar(`INSERT INTO ${tabla} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, Object.values(datos))
+  return id
 }
+
+/** UPDATE de las columnas del objeto en la fila con ese id. */
+async function actualizar(tabla: string, id: string, cambios: Fila) {
+  const cols = Object.keys(cambios).filter((c) => cambios[c] !== undefined)
+  if (!cols.length) return
+  await ejecutar(`UPDATE ${tabla} SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, [...cols.map((c) => cambios[c]), id])
+}
+
+const borrar = (tabla: string, id: string) => ejecutar(`DELETE FROM ${tabla} WHERE id = ?`, [id])
 
 // ---------- Cuentas ----------
 export async function listarCuentas(incluirArchivadas = false): Promise<CuentaConSaldo[]> {
-  let q = supabase.from('cuentas').select('id,nombre,tipo,moneda,saldo_inicial_centavos,archivada').order('creado_en')
-  if (!incluirArchivadas) q = q.eq('archivada', false)
-  const cuentas = revisar(await q) as Cuenta[]
-  const saldos = revisar(await supabase.from('saldos_cuentas').select('cuenta_id,saldo_centavos')) as {
-    cuenta_id: string
-    saldo_centavos: number
-  }[]
-  const mapa = new Map(saldos.map((s) => [s.cuenta_id, Number(s.saldo_centavos)]))
-  return cuentas.map((c) => ({
-    ...c,
-    saldo_inicial_centavos: Number(c.saldo_inicial_centavos),
-    saldo_centavos: mapa.get(c.id) ?? Number(c.saldo_inicial_centavos),
-  }))
+  return consultar<CuentaConSaldo>(
+    `SELECT c.id, c.nombre, c.tipo, c.moneda, c.saldo_inicial_centavos, c.archivada, s.saldo_centavos
+     FROM cuentas c JOIN saldos_cuentas s ON s.cuenta_id = c.id
+     ${incluirArchivadas ? '' : 'WHERE c.archivada = 0'}
+     ORDER BY c.creado_en`,
+  )
 }
 
 export async function guardarCuenta(c: Omit<Cuenta, 'id' | 'archivada'> & { id?: string }) {
-  if (c.id) {
-    const { id, ...resto } = c
-    revisar(await supabase.from('cuentas').update(resto).eq('id', id))
-  } else {
-    revisar(await supabase.from('cuentas').insert(c))
-  }
+  const { id, ...resto } = c
+  if (id) await actualizar('cuentas', id, resto)
+  else await insertar('cuentas', resto)
 }
 
 export async function archivarCuenta(id: string, archivada: boolean) {
-  revisar(await supabase.from('cuentas').update({ archivada }).eq('id', id))
+  await actualizar('cuentas', id, { archivada })
+}
+
+/** Borra una cuenta (solo funciona si no tiene movimientos). */
+export async function borrarCuenta(id: string) {
+  await borrar('cuentas', id)
+}
+
+/** Crea la cuenta de una tarjeta de crédito (saldo negativo = lo que se debe) y devuelve su id. */
+export async function crearCuentaTarjeta(nombre: string, debeCentavos: number): Promise<string> {
+  return insertar('cuentas', { nombre, tipo: 'tarjeta', moneda: 'DOP', saldo_inicial_centavos: -debeCentavos })
 }
 
 // ---------- Categorías ----------
 export async function listarCategorias(): Promise<Categoria[]> {
-  return revisar(await supabase.from('categorias').select('id,nombre,tipo').order('nombre')) as Categoria[]
+  return consultar<Categoria>('SELECT id, nombre, tipo FROM categorias ORDER BY nombre')
 }
 
 export async function crearCategoria(nombre: string, tipo: Categoria['tipo']) {
-  revisar(await supabase.from('categorias').insert({ nombre: nombre.trim(), tipo }))
+  await insertar('categorias', { nombre: nombre.trim(), tipo })
 }
 
 export async function borrarCategoria(id: string) {
-  revisar(await supabase.from('categorias').delete().eq('id', id))
+  await borrar('categorias', id)
+}
+
+async function categoriaId(nombre: string, tipo: 'ingreso' | 'gasto'): Promise<string> {
+  const existente = uno<{ id: string }>('SELECT id FROM categorias WHERE tipo = ? AND nombre = ?', [tipo, nombre])
+  return existente ? existente.id : insertar('categorias', { nombre, tipo })
 }
 
 // ---------- Movimientos ----------
@@ -115,51 +132,45 @@ export interface FiltroMovimientos {
   tipo?: TipoMovimiento
 }
 
+const COLUMNAS_MOV = `id, tipo, monto_centavos, cuenta_id, cuenta_destino_id, monto_destino_centavos, categoria_id, fecha, nota,
+  jornada_id, carga_id, mantenimiento_id, pago_deuda_id, aporte_meta_id, inversion_id, origen`
+
 export async function listarMovimientos(f: FiltroMovimientos): Promise<Movimiento[]> {
-  let q = supabase
-    .from('movimientos')
-    .select('id,tipo,monto_centavos,cuenta_id,cuenta_destino_id,monto_destino_centavos,categoria_id,fecha,nota,jornada_id,carga_id,mantenimiento_id,pago_deuda_id,aporte_meta_id,inversion_id,origen')
-    .gte('fecha', f.desde)
-    .lte('fecha', f.hasta)
-    .order('fecha', { ascending: false })
-    .order('creado_en', { ascending: false })
-  if (f.cuentaId) q = q.or(`cuenta_id.eq.${f.cuentaId},cuenta_destino_id.eq.${f.cuentaId}`)
-  if (f.tipo) q = q.eq('tipo', f.tipo)
-  const filas = revisar(await q) as Movimiento[]
-  return filas.map((m) => ({
-    ...m,
-    monto_centavos: Number(m.monto_centavos),
-    monto_destino_centavos: m.monto_destino_centavos == null ? null : Number(m.monto_destino_centavos),
-  }))
+  const cond = ['fecha >= ?', 'fecha <= ?']
+  const params: (string | null)[] = [f.desde, f.hasta]
+  if (f.cuentaId) {
+    cond.push('(cuenta_id = ? OR cuenta_destino_id = ?)')
+    params.push(f.cuentaId, f.cuentaId)
+  }
+  if (f.tipo) {
+    cond.push('tipo = ?')
+    params.push(f.tipo)
+  }
+  return consultar<Movimiento>(
+    `SELECT ${COLUMNAS_MOV} FROM movimientos WHERE ${cond.join(' AND ')} ORDER BY fecha DESC, creado_en DESC`,
+    params,
+  )
 }
 
 export async function guardarMovimiento(m: NuevoMovimiento, id?: string) {
-  if (id) revisar(await supabase.from('movimientos').update(m).eq('id', id))
-  else revisar(await supabase.from('movimientos').insert(m))
+  if (id) await actualizar('movimientos', id, { ...m })
+  else await insertar('movimientos', { ...m })
 }
 
 export async function borrarMovimiento(id: string) {
-  revisar(await supabase.from('movimientos').delete().eq('id', id))
+  await borrar('movimientos', id)
 }
 
 // ---------- Tasa del dólar ----------
 export async function obtenerTasaUSD(): Promise<number | null> {
-  const fila = revisar(
-    await supabase.from('tasas_cambio').select('pesos_por_unidad').eq('moneda', 'USD').maybeSingle(),
-  ) as { pesos_por_unidad: number } | null
-  return fila ? Number(fila.pesos_por_unidad) : null
+  return uno<{ p: number }>("SELECT pesos_por_unidad AS p FROM tasas_cambio WHERE moneda = 'USD'")?.p ?? null
 }
 
 export async function guardarTasaUSD(pesos: number) {
-  const { data } = await supabase.auth.getUser()
-  if (!data.user) throw new Error('Sesión no válida')
-  revisar(
-    await supabase.from('tasas_cambio').upsert({
-      usuario_id: data.user.id,
-      moneda: 'USD',
-      pesos_por_unidad: pesos,
-      actualizada_en: new Date().toISOString(),
-    }),
+  await ejecutar(
+    `INSERT INTO tasas_cambio (moneda, pesos_por_unidad, actualizada_en) VALUES ('USD', ?, ?)
+     ON CONFLICT (moneda) DO UPDATE SET pesos_por_unidad = excluded.pesos_por_unidad, actualizada_en = excluded.actualizada_en`,
+    [pesos, new Date().toISOString()],
   )
 }
 
@@ -172,27 +183,19 @@ export interface Plataforma {
 }
 
 export async function listarPlataformas(): Promise<Plataforma[]> {
-  const filas = revisar(
-    await supabase.from('plataformas').select('id,nombre,comision_pct,activa').order('nombre'),
-  ) as Plataforma[]
-  return filas.map((p) => ({ ...p, comision_pct: Number(p.comision_pct) }))
+  return consultar<Plataforma>('SELECT id, nombre, comision_pct, activa FROM plataformas ORDER BY nombre')
 }
 
 export async function actualizarPlataforma(id: string, cambios: Partial<Pick<Plataforma, 'comision_pct' | 'activa'>>) {
-  revisar(await supabase.from('plataformas').update(cambios).eq('id', id))
+  await actualizar('plataformas', id, cambios)
 }
 
 export async function crearPlataforma(nombre: string, comision_pct: number) {
   const limpio = nombre.trim()
-  let cat = revisar(
-    await supabase.from('categorias').select('id').eq('tipo', 'ingreso').eq('nombre', limpio).maybeSingle(),
-  ) as { id: string } | null
-  if (!cat) {
-    cat = revisar(
-      await supabase.from('categorias').insert({ nombre: limpio, tipo: 'ingreso' }).select('id').single(),
-    ) as { id: string }
-  }
-  revisar(await supabase.from('plataformas').insert({ nombre: limpio, comision_pct, categoria_id: cat.id }))
+  await transaccion(async () => {
+    const cat = await categoriaId(limpio, 'ingreso')
+    await insertar('plataformas', { nombre: limpio, comision_pct, categoria_id: cat })
+  })
 }
 
 // ---------- Jornadas ----------
@@ -239,36 +242,28 @@ export interface Jornada {
   gastos: GastoJornada[]
 }
 
-const num = (v: unknown) => (v == null ? null : Number(v))
-
 export async function listarJornadas(desde: string, hasta: string): Promise<JornadaResumen[]> {
-  const filas = revisar(
-    await supabase.from('jornadas_resumen').select('*').gte('fecha', desde).lte('fecha', hasta)
-      .order('fecha', { ascending: false }),
-  ) as JornadaResumen[]
-  return filas.map((j) => ({
-    ...j,
-    km: num(j.km), km_inicial: num(j.km_inicial), km_final: num(j.km_final),
-    bruto_centavos: Number(j.bruto_centavos), comision_centavos: Number(j.comision_centavos),
-    gastos_centavos: Number(j.gastos_centavos), neto_centavos: Number(j.neto_centavos),
-  }))
+  return consultar<JornadaResumen>(
+    `SELECT r.* FROM jornadas_resumen r JOIN jornadas j ON j.id = r.id
+     WHERE r.fecha >= ? AND r.fecha <= ? ORDER BY r.fecha DESC, j.creado_en DESC`,
+    [desde, hasta],
+  )
 }
 
 /** Totales por plataforma en un rango de fechas (para comparar InDrive vs Uber). */
 export async function totalesPorPlataforma(desde: string, hasta: string) {
-  const filas = revisar(
-    await supabase
-      .from('jornada_plataformas')
-      .select('plataforma_id,viajes,efectivo_centavos,app_centavos,comision_centavos,jornadas!inner(fecha)')
-      .gte('jornadas.fecha', desde)
-      .lte('jornadas.fecha', hasta),
-  ) as JornadaPlataforma[]
+  const filas = consultar<JornadaPlataforma>(
+    `SELECT jp.plataforma_id, jp.viajes, jp.efectivo_centavos, jp.app_centavos, jp.comision_centavos
+     FROM jornada_plataformas jp JOIN jornadas j ON j.id = jp.jornada_id
+     WHERE j.fecha >= ? AND j.fecha <= ?`,
+    [desde, hasta],
+  )
   const mapa = new Map<string, { viajes: number; bruto: number; comision: number; dias: number }>()
   for (const f of filas) {
     const t = mapa.get(f.plataforma_id) ?? { viajes: 0, bruto: 0, comision: 0, dias: 0 }
-    t.viajes += Number(f.viajes)
-    t.bruto += Number(f.efectivo_centavos) + Number(f.app_centavos)
-    t.comision += Number(f.comision_centavos)
+    t.viajes += f.viajes
+    t.bruto += f.efectivo_centavos + f.app_centavos
+    t.comision += f.comision_centavos
     t.dias += 1
     mapa.set(f.plataforma_id, t)
   }
@@ -276,44 +271,81 @@ export async function totalesPorPlataforma(desde: string, hasta: string) {
 }
 
 export async function obtenerJornada(id: string): Promise<Jornada> {
-  const j = revisar(
-    await supabase
-      .from('jornadas')
-      .select('id,fecha,minutos,km_inicial,km_final,cuenta_efectivo_id,cuenta_app_id,nota,jornada_plataformas(plataforma_id,viajes,efectivo_centavos,app_centavos,comision_centavos)')
-      .eq('id', id)
-      .single(),
-  ) as Omit<Jornada, 'plataformas' | 'gastos'> & { jornada_plataformas: JornadaPlataforma[] }
-  const gastos = revisar(
-    await supabase.from('movimientos').select('categoria_id,monto_centavos,cuenta_id,nota')
-      .eq('jornada_id', id).eq('origen', 'jornada_gasto'),
-  ) as GastoJornada[]
-  const { jornada_plataformas, ...resto } = j
+  const j = uno<Omit<Jornada, 'plataformas' | 'gastos'>>(
+    'SELECT id, fecha, minutos, km_inicial, km_final, cuenta_efectivo_id, cuenta_app_id, nota FROM jornadas WHERE id = ?',
+    [id],
+  )
+  if (!j) throw new Error('Jornada no encontrada')
   return {
-    ...resto,
-    plataformas: jornada_plataformas.map((p) => ({
-      ...p,
-      efectivo_centavos: Number(p.efectivo_centavos),
-      app_centavos: Number(p.app_centavos),
-      comision_centavos: Number(p.comision_centavos),
-    })),
-    gastos: gastos.map((g) => ({ ...g, monto_centavos: Number(g.monto_centavos) })),
+    ...j,
+    plataformas: consultar<JornadaPlataforma>(
+      'SELECT plataforma_id, viajes, efectivo_centavos, app_centavos, comision_centavos FROM jornada_plataformas WHERE jornada_id = ?',
+      [id],
+    ),
+    gastos: consultar<GastoJornada>(
+      "SELECT categoria_id, monto_centavos, cuenta_id, nota FROM movimientos WHERE jornada_id = ? AND origen = 'jornada_gasto'",
+      [id],
+    ),
   }
 }
 
+/**
+ * Guarda una jornada completa (crear o editar) y regenera sus movimientos: ingresos en efectivo y por
+ * app, comisiones y gastos del día. Todo o nada.
+ */
 export async function guardarJornada(j: Jornada): Promise<string> {
-  return revisar(await supabase.rpc('guardar_jornada', { p: j })) as string
+  if (!j.cuenta_efectivo_id) throw new Error('Elige la cuenta donde guardas el efectivo')
+  const cuentas = [j.cuenta_efectivo_id, j.cuenta_app_id].filter(Boolean) as string[]
+  for (const c of cuentas) {
+    const cuenta = uno<{ moneda: string }>('SELECT moneda FROM cuentas WHERE id = ?', [c])
+    if (!cuenta) throw new Error('Cuenta no válida')
+    if (cuenta.moneda !== 'DOP') throw new Error('Las cuentas de la jornada deben ser en pesos (RD$)')
+  }
+  if (j.plataformas.some((p) => p.app_centavos > 0) && !j.cuenta_app_id) throw new Error('Elige la cuenta donde la app te deposita')
+
+  return transaccion(async () => {
+    const datos = {
+      fecha: j.fecha, minutos: j.minutos, km_inicial: j.km_inicial, km_final: j.km_final,
+      cuenta_efectivo_id: j.cuenta_efectivo_id, cuenta_app_id: j.cuenta_app_id, nota: j.nota?.trim() || null,
+    }
+    let id = j.id
+    if (id) {
+      await actualizar('jornadas', id, datos)
+      await ejecutar('DELETE FROM jornada_plataformas WHERE jornada_id = ?', [id])
+      await ejecutar('DELETE FROM movimientos WHERE jornada_id = ?', [id])
+    } else {
+      id = await insertar('jornadas', datos)
+    }
+    const catComision = await categoriaId('Comisiones apps', 'gasto')
+    for (const p of j.plataformas) {
+      const plat = uno<{ nombre: string; categoria_id: string | null }>('SELECT nombre, categoria_id FROM plataformas WHERE id = ?', [p.plataforma_id])
+      if (!plat) throw new Error('Plataforma no válida')
+      await insertar('jornada_plataformas', { jornada_id: id, ...p })
+      const mov = (tipo: string, monto: number, cuenta: string, categoria: string | null, nota: string, origen: string) =>
+        insertar('movimientos', { tipo, monto_centavos: monto, cuenta_id: cuenta, categoria_id: categoria, fecha: j.fecha, nota, jornada_id: id, origen })
+      if (p.efectivo_centavos > 0) await mov('ingreso', p.efectivo_centavos, j.cuenta_efectivo_id, plat.categoria_id, `${plat.nombre} · efectivo`, 'jornada_ingreso')
+      if (p.app_centavos > 0) await mov('ingreso', p.app_centavos, j.cuenta_app_id!, plat.categoria_id, `${plat.nombre} · pagado por la app`, 'jornada_ingreso')
+      if (p.comision_centavos > 0) await mov('gasto', p.comision_centavos, j.cuenta_efectivo_id, catComision, `Comisión ${plat.nombre}`, 'jornada_comision')
+    }
+    for (const g of j.gastos) {
+      await insertar('movimientos', {
+        tipo: 'gasto', monto_centavos: g.monto_centavos, cuenta_id: g.cuenta_id || j.cuenta_efectivo_id, categoria_id: g.categoria_id,
+        fecha: j.fecha, nota: g.nota?.trim() || null, jornada_id: id, origen: 'jornada_gasto',
+      })
+    }
+    return id
+  })
 }
 
 export async function borrarJornada(id: string) {
-  revisar(await supabase.from('jornadas').delete().eq('id', id))
+  await borrar('jornadas', id)
 }
 
 /** Datos para prellenar una jornada nueva: último km final y cuentas usadas la última vez. */
 export async function ultimaJornada() {
-  return revisar(
-    await supabase.from('jornadas').select('km_final,cuenta_efectivo_id,cuenta_app_id')
-      .order('fecha', { ascending: false }).order('creado_en', { ascending: false }).limit(1).maybeSingle(),
-  ) as { km_final: number | null; cuenta_efectivo_id: string | null; cuenta_app_id: string | null } | null
+  return uno<{ km_final: number | null; cuenta_efectivo_id: string | null; cuenta_app_id: string | null }>(
+    'SELECT km_final, cuenta_efectivo_id, cuenta_app_id FROM jornadas ORDER BY fecha DESC, creado_en DESC LIMIT 1',
+  )
 }
 
 // ---------- Vehículo ----------
@@ -396,64 +428,57 @@ export interface DatosVehiculo {
 
 /** Carga el vehículo activo con todo su historial (null si aún no hay vehículo). */
 export async function obtenerDatosVehiculo(): Promise<DatosVehiculo | null> {
-  const vehiculo = revisar(
-    await supabase.from('vehiculos').select('id,marca,modelo,anio,placa,km_registro,combustible')
-      .eq('activo', true).order('creado_en').limit(1).maybeSingle(),
-  ) as Vehiculo | null
+  const vehiculo = uno<Vehiculo>(
+    'SELECT id, marca, modelo, anio, placa, km_registro, combustible FROM vehiculos WHERE activo = 1 ORDER BY creado_en LIMIT 1',
+  )
   if (!vehiculo) return null
-  const [km, cargas, mants, recs, docs] = await Promise.all([
-    supabase.from('vehiculos_km').select('km_actual').eq('vehiculo_id', vehiculo.id).maybeSingle(),
-    supabase.from('cargas_combustible').select('id,fecha,galones,total_centavos,km,tanque_lleno,cuenta_id,nota')
-      .eq('vehiculo_id', vehiculo.id).order('fecha', { ascending: false }).order('creado_en', { ascending: false }),
-    supabase.from('mantenimientos').select('id,tipo,fecha,km,costo_centavos,cuenta_id,taller,nota')
-      .eq('vehiculo_id', vehiculo.id).order('fecha', { ascending: false }),
-    supabase.from('recordatorios').select('id,tipo,cada_km,cada_meses,ultimo_km,ultima_fecha')
-      .eq('vehiculo_id', vehiculo.id).order('cada_km', { ascending: true, nullsFirst: false }),
-    supabase.from('documentos').select('id,tipo,nombre,vence,nota').order('vence'),
-  ])
   return {
     vehiculo,
-    kmActual: Number((revisar(km) as { km_actual: number } | null)?.km_actual ?? vehiculo.km_registro),
-    cargas: (revisar(cargas) as CargaCombustible[]).map((c) => ({
-      ...c, galones: Number(c.galones), total_centavos: Number(c.total_centavos),
-    })),
-    mantenimientos: (revisar(mants) as Mantenimiento[]).map((m) => ({ ...m, costo_centavos: Number(m.costo_centavos) })),
-    recordatorios: revisar(recs) as Recordatorio[],
-    documentos: revisar(docs) as Documento[],
+    kmActual: uno<{ k: number }>('SELECT km_actual AS k FROM vehiculos_km WHERE vehiculo_id = ?', [vehiculo.id])?.k ?? vehiculo.km_registro,
+    cargas: consultar<CargaCombustible>(
+      'SELECT id, fecha, galones, total_centavos, km, tanque_lleno, cuenta_id, nota FROM cargas_combustible WHERE vehiculo_id = ? ORDER BY fecha DESC, creado_en DESC',
+      [vehiculo.id],
+    ),
+    mantenimientos: consultar<Mantenimiento>(
+      'SELECT id, tipo, fecha, km, costo_centavos, cuenta_id, taller, nota FROM mantenimientos WHERE vehiculo_id = ? ORDER BY fecha DESC',
+      [vehiculo.id],
+    ),
+    recordatorios: consultar<Recordatorio>(
+      'SELECT id, tipo, cada_km, cada_meses, ultimo_km, ultima_fecha FROM recordatorios WHERE vehiculo_id = ? ORDER BY cada_km IS NULL, cada_km',
+      [vehiculo.id],
+    ),
+    documentos: consultar<Documento>('SELECT id, tipo, nombre, vence, nota FROM documentos ORDER BY vence'),
   }
 }
 
 export async function guardarVehiculo(v: Omit<Vehiculo, 'id'> & { id?: string }) {
   const { id, ...resto } = v
-  if (id) revisar(await supabase.from('vehiculos').update(resto).eq('id', id))
-  else revisar(await supabase.from('vehiculos').insert(resto))
+  if (id) await actualizar('vehiculos', id, resto)
+  else await insertar('vehiculos', resto)
 }
 
 type SinId<T> = Omit<T, 'id'>
 
-async function guardarEn<T extends object>(tabla: string, fila: T, id?: string) {
-  if (id) revisar(await supabase.from(tabla).update(fila).eq('id', id))
-  else revisar(await supabase.from(tabla).insert(fila))
-}
-async function borrarDe(tabla: string, id: string) {
-  revisar(await supabase.from(tabla).delete().eq('id', id))
+async function guardarEn(tabla: string, fila: Fila, id?: string) {
+  if (id) await actualizar(tabla, id, fila)
+  else await insertar(tabla, fila)
 }
 
 export const guardarCarga = (vehiculoId: string, c: SinId<CargaCombustible>, id?: string) =>
-  guardarEn('cargas_combustible', id ? c : { ...c, vehiculo_id: vehiculoId }, id)
-export const borrarCarga = (id: string) => borrarDe('cargas_combustible', id)
+  guardarEn('cargas_combustible', id ? { ...c } : { ...c, vehiculo_id: vehiculoId }, id)
+export const borrarCarga = (id: string) => borrar('cargas_combustible', id)
 
 export const guardarMantenimiento = (vehiculoId: string, m: SinId<Mantenimiento>, id?: string) =>
-  guardarEn('mantenimientos', id ? m : { ...m, vehiculo_id: vehiculoId }, id)
-export const borrarMantenimiento = (id: string) => borrarDe('mantenimientos', id)
+  guardarEn('mantenimientos', id ? { ...m } : { ...m, vehiculo_id: vehiculoId }, id)
+export const borrarMantenimiento = (id: string) => borrar('mantenimientos', id)
 
 export const guardarRecordatorio = (vehiculoId: string, r: SinId<Recordatorio>, id?: string) =>
-  guardarEn('recordatorios', id ? r : { ...r, vehiculo_id: vehiculoId }, id)
-export const borrarRecordatorio = (id: string) => borrarDe('recordatorios', id)
+  guardarEn('recordatorios', id ? { ...r } : { ...r, vehiculo_id: vehiculoId }, id)
+export const borrarRecordatorio = (id: string) => borrar('recordatorios', id)
 
 export const guardarDocumento = (vehiculoId: string, d: SinId<Documento>, id?: string) =>
-  guardarEn('documentos', id ? d : { ...d, vehiculo_id: d.tipo === 'licencia' ? null : vehiculoId }, id)
-export const borrarDocumento = (id: string) => borrarDe('documentos', id)
+  guardarEn('documentos', id ? { ...d } : { ...d, vehiculo_id: d.tipo === 'licencia' ? null : vehiculoId }, id)
+export const borrarDocumento = (id: string) => borrar('documentos', id)
 
 // ---------- Meta diaria ----------
 export type TipoObligacion = 'casa' | 'servicios' | 'comida' | 'deuda' | 'vehiculo' | 'familia' | 'ahorro' | 'otro'
@@ -477,19 +502,15 @@ export interface Obligacion {
 }
 
 export async function listarObligaciones(): Promise<Obligacion[]> {
-  const filas = revisar(
-    await supabase.from('obligaciones').select('id,nombre,tipo,monto_centavos,activa').order('creado_en'),
-  ) as Obligacion[]
-  return filas.map((o) => ({ ...o, monto_centavos: Number(o.monto_centavos) }))
+  return consultar<Obligacion>('SELECT id, nombre, tipo, monto_centavos, activa FROM obligaciones ORDER BY creado_en')
 }
 
 export async function guardarObligacion(o: Omit<Obligacion, 'id' | 'activa'>, id?: string) {
-  if (id) revisar(await supabase.from('obligaciones').update(o).eq('id', id))
-  else revisar(await supabase.from('obligaciones').insert(o))
+  await guardarEn('obligaciones', { ...o }, id)
 }
 
 export async function borrarObligacion(id: string) {
-  revisar(await supabase.from('obligaciones').delete().eq('id', id))
+  await borrar('obligaciones', id)
 }
 
 export interface PreferenciasMeta {
@@ -498,16 +519,16 @@ export interface PreferenciasMeta {
 }
 
 export async function obtenerPreferenciasMeta(): Promise<PreferenciasMeta> {
-  const p = revisar(
-    await supabase.from('perfiles').select('dias_trabajo_semana,margen_pct').maybeSingle(),
-  ) as PreferenciasMeta | null
-  return p ?? { dias_trabajo_semana: 6, margen_pct: 10 }
+  return uno<PreferenciasMeta>('SELECT dias_trabajo_semana, margen_pct FROM preferencias WHERE id = 1') ?? { dias_trabajo_semana: 6, margen_pct: 10 }
+}
+
+async function guardarPreferencias(cambios: Fila) {
+  const cols = Object.keys(cambios)
+  await ejecutar(`UPDATE preferencias SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = 1`, Object.values(cambios))
 }
 
 export async function guardarPreferenciasMeta(p: PreferenciasMeta) {
-  const { data } = await supabase.auth.getUser()
-  if (!data.user) throw new Error('Sesión no válida')
-  revisar(await supabase.from('perfiles').update(p).eq('id', data.user.id))
+  await guardarPreferencias({ ...p })
 }
 
 // ---------- Deudas ----------
@@ -570,56 +591,45 @@ export interface PagoDeuda {
 }
 
 export async function listarDeudas(): Promise<DeudaConEstado[]> {
-  const [ds, est] = await Promise.all([
-    supabase.from('deudas').select('id,nombre,tipo,acreedor,saldo_inicial_centavos,tasa_anual,cuota_centavos,dia_pago,incluir_en_meta,pagada,creado_en,frecuencia,dia_pago_2,dia_semana,limite_credito_centavos,dia_corte,cuenta_tarjeta_id').order('creado_en'),
-    supabase.from('deudas_estado').select('*'),
-  ])
-  const estados = new Map((revisar(est) as Record<string, unknown>[]).map((e) => [e.deuda_id as string, e]))
-  return (revisar(ds) as Deuda[]).map((d) => {
-    const e = estados.get(d.id) ?? {}
-    return {
-      ...d,
-      saldo_inicial_centavos: Number(d.saldo_inicial_centavos),
-      tasa_anual: Number(d.tasa_anual),
-      cuota_centavos: Number(d.cuota_centavos),
-      frecuencia: d.frecuencia ?? 'mensual',
-      limite_credito_centavos: d.limite_credito_centavos == null ? null : Number(d.limite_credito_centavos),
-      saldo_centavos: Number(e.saldo_centavos ?? d.saldo_inicial_centavos),
-      pagado_centavos: Number(e.pagado_centavos ?? 0),
-      intereses_pagados_centavos: Number(e.intereses_pagados_centavos ?? 0),
-      cargos_centavos: Number(e.cargos_centavos ?? 0),
-      ultimo_pago: (e.ultimo_pago as string | null) ?? null,
-    }
-  })
+  return consultar<DeudaConEstado>(
+    `SELECT d.id, d.nombre, d.tipo, d.acreedor, d.saldo_inicial_centavos, d.tasa_anual, d.cuota_centavos, d.dia_pago,
+            d.incluir_en_meta, d.pagada, d.creado_en, d.frecuencia, d.dia_pago_2, d.dia_semana, d.limite_credito_centavos,
+            d.dia_corte, d.cuenta_tarjeta_id,
+            e.saldo_centavos, e.pagado_centavos, e.intereses_pagados_centavos, e.cargos_centavos, e.ultimo_pago
+     FROM deudas d JOIN deudas_estado e ON e.deuda_id = d.id
+     ORDER BY d.creado_en`,
+  )
 }
 
 export async function guardarDeuda(d: Omit<Deuda, 'id' | 'pagada' | 'creado_en'>, id?: string) {
-  if (id) revisar(await supabase.from('deudas').update(d).eq('id', id))
-  else revisar(await supabase.from('deudas').insert(d))
+  await guardarEn('deudas', { ...d }, id)
 }
 
 export async function marcarDeudaPagada(id: string, pagada: boolean) {
-  revisar(await supabase.from('deudas').update({ pagada }).eq('id', id))
+  await actualizar('deudas', id, { pagada })
 }
 
 export async function borrarDeuda(id: string) {
-  revisar(await supabase.from('deudas').delete().eq('id', id))
+  await borrar('deudas', id)
 }
 
+const COLUMNAS_PAGO = 'id, deuda_id, tipo, fecha, monto_centavos, interes_centavos, cuenta_id, nota'
+
 export async function listarPagosDeuda(deudaId: string): Promise<PagoDeuda[]> {
-  const filas = revisar(
-    await supabase.from('pagos_deuda').select('id,deuda_id,tipo,fecha,monto_centavos,interes_centavos,cuenta_id,nota')
-      .eq('deuda_id', deudaId).order('fecha', { ascending: false }).order('creado_en', { ascending: false }),
-  ) as PagoDeuda[]
-  return filas.map((p) => ({ ...p, monto_centavos: Number(p.monto_centavos), interes_centavos: Number(p.interes_centavos) }))
+  return consultar<PagoDeuda>(`SELECT ${COLUMNAS_PAGO} FROM pagos_deuda WHERE deuda_id = ? ORDER BY fecha DESC, creado_en DESC`, [deudaId])
+}
+
+/** Todos los pagos y cargos de deudas desde una fecha (para reportes). */
+export async function listarPagosDeudaDesde(desde: string): Promise<PagoDeuda[]> {
+  return consultar<PagoDeuda>(`SELECT ${COLUMNAS_PAGO} FROM pagos_deuda WHERE fecha >= ?`, [desde])
 }
 
 export async function guardarPagoDeuda(p: Omit<PagoDeuda, 'id'>) {
-  revisar(await supabase.from('pagos_deuda').insert(p))
+  await insertar('pagos_deuda', { ...p })
 }
 
 export async function borrarPagoDeuda(id: string) {
-  revisar(await supabase.from('pagos_deuda').delete().eq('id', id))
+  await borrar('pagos_deuda', id)
 }
 
 export interface PlanDeudas {
@@ -628,18 +638,12 @@ export interface PlanDeudas {
 }
 
 export async function obtenerPlanDeudas(): Promise<PlanDeudas> {
-  const p = revisar(
-    await supabase.from('perfiles').select('estrategia_deudas,pago_extra_deudas_centavos').maybeSingle(),
-  ) as PlanDeudas | null
-  return p
-    ? { ...p, pago_extra_deudas_centavos: Number(p.pago_extra_deudas_centavos) }
-    : { estrategia_deudas: 'avalancha', pago_extra_deudas_centavos: 0 }
+  return uno<PlanDeudas>('SELECT estrategia_deudas, pago_extra_deudas_centavos FROM preferencias WHERE id = 1')
+    ?? { estrategia_deudas: 'avalancha', pago_extra_deudas_centavos: 0 }
 }
 
 export async function guardarPlanDeudas(p: PlanDeudas) {
-  const { data } = await supabase.auth.getUser()
-  if (!data.user) throw new Error('Sesión no válida')
-  revisar(await supabase.from('perfiles').update(p).eq('id', data.user.id))
+  await guardarPreferencias({ ...p })
 }
 
 // ---------- Asesor IA ----------
@@ -657,37 +661,53 @@ export interface MensajeIA {
 }
 
 export async function listarConversaciones(): Promise<Conversacion[]> {
-  return revisar(
-    await supabase.from('conversaciones_ia').select('id,titulo,creado_en').order('creado_en', { ascending: false }).limit(50),
-  ) as Conversacion[]
+  return consultar<Conversacion>('SELECT id, titulo, creado_en FROM conversaciones_ia ORDER BY creado_en DESC LIMIT 50')
 }
 
 export async function listarMensajesIA(conversacionId: string): Promise<MensajeIA[]> {
-  return revisar(
-    await supabase.from('mensajes_ia').select('id,rol,contenido,creado_en')
-      .eq('conversacion_id', conversacionId).order('creado_en'),
-  ) as MensajeIA[]
+  return consultar<MensajeIA>('SELECT id, rol, contenido, creado_en FROM mensajes_ia WHERE conversacion_id = ? ORDER BY creado_en', [conversacionId])
 }
 
 export async function borrarConversacion(id: string) {
-  revisar(await supabase.from('conversaciones_ia').delete().eq('id', id))
+  await borrar('conversaciones_ia', id)
 }
 
-/** Envía la pregunta a la función segura "asesor" de Supabase, que llama a Claude. */
+/** Preguntas por día (protege tu saldo de Anthropic). */
+export const LIMITE_DIARIO_ASESOR = 30
+const MENSAJES_HISTORIAL = 20
+
+/** Envía la pregunta a Claude (desde el programa de escritorio) y guarda la conversación en tu PC. */
 export async function preguntarAsesor(conversacionId: string | null, mensaje: string, contexto: unknown) {
-  const { data, error } = await supabase.functions.invoke('asesor', {
-    body: { conversacion_id: conversacionId, mensaje, contexto },
-  })
-  if (error) {
-    // Si la función respondió con un error propio, mostramos su mensaje.
-    const respuesta = (error as { context?: Response }).context
-    if (respuesta && typeof respuesta.json === 'function') {
-      const cuerpo = await respuesta.json().catch(() => null)
-      if (cuerpo?.error) throw new Error(cuerpo.error)
-    }
-    throw new Error('No se pudo contactar al asesor. Revisa que la función "asesor" esté publicada en Supabase.')
+  if (!escritorio) throw new Error('El asesor IA funciona en el programa de Windows de FENIX APP.')
+  const desde = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const hechas = uno<{ n: number }>("SELECT count(*) AS n FROM mensajes_ia WHERE rol = 'user' AND creado_en >= ?", [desde])?.n ?? 0
+  if (hechas >= LIMITE_DIARIO_ASESOR) {
+    throw new Error(`Llegaste al límite de ${LIMITE_DIARIO_ASESOR} preguntas en 24 horas. Vuelve a intentarlo más tarde.`)
   }
-  return data as { conversacion_id: string; respuesta: string }
+  const historial = conversacionId
+    ? consultar<{ rol: 'user' | 'assistant'; contenido: string }>(
+        'SELECT rol, contenido FROM (SELECT rol, contenido, creado_en FROM mensajes_ia WHERE conversacion_id = ? ORDER BY creado_en DESC LIMIT ?) ORDER BY creado_en',
+        [conversacionId, MENSAJES_HISTORIAL],
+      )
+    : []
+  while (historial.length && historial[0].rol !== 'user') historial.shift()
+
+  const r = await escritorio.asesor.preguntar({ historial, mensaje, contexto })
+
+  return transaccion(async () => {
+    let id = conversacionId
+    if (!id) {
+      const limpio = mensaje.replace(/\s+/g, ' ').trim()
+      id = await insertar('conversaciones_ia', { titulo: limpio.length > 60 ? `${limpio.slice(0, 57)}…` : limpio })
+    }
+    const ahora = Date.now()
+    await insertar('mensajes_ia', { conversacion_id: id, rol: 'user', contenido: mensaje, creado_en: new Date(ahora).toISOString() })
+    await insertar('mensajes_ia', {
+      conversacion_id: id, rol: 'assistant', contenido: r.respuesta, creado_en: new Date(ahora + 1).toISOString(),
+      tokens_entrada: r.tokensEntrada, tokens_salida: r.tokensSalida,
+    })
+    return { conversacion_id: id, respuesta: r.respuesta }
+  })
 }
 
 // ---------- Presupuesto ----------
@@ -699,38 +719,33 @@ export interface Presupuesto {
 }
 
 export async function listarPresupuestos(mes: string): Promise<Presupuesto[]> {
-  const filas = revisar(
-    await supabase.from('presupuestos').select('id,mes,categoria_id,limite_centavos').eq('mes', mes),
-  ) as Presupuesto[]
-  return filas.map((p) => ({ ...p, limite_centavos: Number(p.limite_centavos) }))
+  return consultar<Presupuesto>('SELECT id, mes, categoria_id, limite_centavos FROM presupuestos WHERE mes = ?', [mes])
 }
 
 /** Crea o actualiza los límites de un mes (una fila por categoría). */
 export async function guardarLimites(mes: string, limites: { categoria_id: string; limite_centavos: number }[]) {
   if (!limites.length) return
-  const { data } = await supabase.auth.getUser()
-  if (!data.user) throw new Error('Sesión no válida')
-  revisar(
-    await supabase.from('presupuestos').upsert(
-      limites.map((l) => ({ ...l, mes, usuario_id: data.user!.id })),
-      { onConflict: 'usuario_id,mes,categoria_id' },
-    ),
-  )
+  await transaccion(async () => {
+    for (const l of limites) {
+      await ejecutar(
+        `INSERT INTO presupuestos (id, mes, categoria_id, limite_centavos) VALUES (?, ?, ?, ?)
+         ON CONFLICT (mes, categoria_id) DO UPDATE SET limite_centavos = excluded.limite_centavos`,
+        [nuevoId(), mes, l.categoria_id, l.limite_centavos],
+      )
+    }
+  })
 }
 
 export async function borrarPresupuesto(id: string) {
-  revisar(await supabase.from('presupuestos').delete().eq('id', id))
+  await borrar('presupuestos', id)
 }
 
 export async function obtenerUmbralAlerta(): Promise<number> {
-  const p = revisar(await supabase.from('perfiles').select('umbral_alerta_pct').maybeSingle()) as { umbral_alerta_pct: number } | null
-  return p?.umbral_alerta_pct ?? 80
+  return uno<{ u: number }>('SELECT umbral_alerta_pct AS u FROM preferencias WHERE id = 1')?.u ?? 80
 }
 
 export async function guardarUmbralAlerta(pct: number) {
-  const { data } = await supabase.auth.getUser()
-  if (!data.user) throw new Error('Sesión no válida')
-  revisar(await supabase.from('perfiles').update({ umbral_alerta_pct: pct }).eq('id', data.user.id))
+  await guardarPreferencias({ umbral_alerta_pct: pct })
 }
 
 // ---------- Metas ----------
@@ -762,46 +777,39 @@ export interface AporteMeta {
 }
 
 export async function listarMetas(): Promise<MetaConAhorro[]> {
-  const [ms, est] = await Promise.all([
-    supabase.from('metas').select('id,nombre,monto_objetivo_centavos,moneda,fecha_objetivo,cuenta_id,incluir_en_meta,estado,creado_en').order('fecha_objetivo'),
-    supabase.from('metas_estado').select('meta_id,ahorrado_centavos,ultimo_aporte'),
-  ])
-  const estados = new Map((revisar(est) as { meta_id: string; ahorrado_centavos: number; ultimo_aporte: string | null }[]).map((e) => [e.meta_id, e]))
-  return (revisar(ms) as Meta[]).map((m) => ({
-    ...m,
-    monto_objetivo_centavos: Number(m.monto_objetivo_centavos),
-    ahorrado_centavos: Number(estados.get(m.id)?.ahorrado_centavos ?? 0),
-    ultimo_aporte: estados.get(m.id)?.ultimo_aporte ?? null,
-  }))
+  return consultar<MetaConAhorro>(
+    `SELECT m.id, m.nombre, m.monto_objetivo_centavos, m.moneda, m.fecha_objetivo, m.cuenta_id, m.incluir_en_meta, m.estado,
+            m.creado_en, e.ahorrado_centavos, e.ultimo_aporte
+     FROM metas m JOIN metas_estado e ON e.meta_id = m.id
+     ORDER BY m.fecha_objetivo`,
+  )
 }
 
 export async function guardarMeta(m: Omit<Meta, 'id' | 'estado' | 'creado_en'>, id?: string) {
-  if (id) revisar(await supabase.from('metas').update(m).eq('id', id))
-  else revisar(await supabase.from('metas').insert(m))
+  await guardarEn('metas', { ...m }, id)
 }
 
 export async function cambiarEstadoMeta(id: string, estado: Meta['estado']) {
-  revisar(await supabase.from('metas').update({ estado }).eq('id', id))
+  await actualizar('metas', id, { estado })
 }
 
 export async function borrarMeta(id: string) {
-  revisar(await supabase.from('metas').delete().eq('id', id))
+  await borrar('metas', id)
 }
 
 export async function listarAportes(metaId: string): Promise<AporteMeta[]> {
-  const filas = revisar(
-    await supabase.from('aportes_meta').select('id,meta_id,tipo,fecha,monto_centavos,cuenta_id,nota')
-      .eq('meta_id', metaId).order('fecha', { ascending: false }).order('creado_en', { ascending: false }),
-  ) as AporteMeta[]
-  return filas.map((a) => ({ ...a, monto_centavos: Number(a.monto_centavos) }))
+  return consultar<AporteMeta>(
+    'SELECT id, meta_id, tipo, fecha, monto_centavos, cuenta_id, nota FROM aportes_meta WHERE meta_id = ? ORDER BY fecha DESC, creado_en DESC',
+    [metaId],
+  )
 }
 
 export async function guardarAporte(a: Omit<AporteMeta, 'id'>) {
-  revisar(await supabase.from('aportes_meta').insert(a))
+  await insertar('aportes_meta', { ...a })
 }
 
 export async function borrarAporte(id: string) {
-  revisar(await supabase.from('aportes_meta').delete().eq('id', id))
+  await borrar('aportes_meta', id)
 }
 
 // ---------- Inversiones ----------
@@ -842,26 +850,18 @@ export interface InversionConValor extends Inversion {
   movimientos: Movimiento[]
 }
 
-const COLUMNAS_MOV = 'id,tipo,monto_centavos,cuenta_id,cuenta_destino_id,monto_destino_centavos,categoria_id,fecha,nota,inversion_id,origen'
-
 export async function listarInversiones(): Promise<InversionConValor[]> {
-  const invs = (revisar(
-    await supabase.from('inversiones')
-      .select('id,nombre,tipo,entidad,moneda,cuenta_id,tasa_anual,fecha_inicio,fecha_vencimiento,estado,nota')
-      .order('fecha_inicio'),
-  ) as Inversion[]).map((i) => ({ ...i, tasa_anual: i.tasa_anual == null ? null : Number(i.tasa_anual) }))
+  const invs = consultar<Inversion>(
+    'SELECT id, nombre, tipo, entidad, moneda, cuenta_id, tasa_anual, fecha_inicio, fecha_vencimiento, estado, nota FROM inversiones ORDER BY fecha_inicio',
+  )
   if (invs.length === 0) return []
-  const ids = invs.map((i) => i.cuenta_id)
-  const [cuentas, movs] = await Promise.all([
-    listarCuentas(true),
-    supabase.from('movimientos').select(COLUMNAS_MOV)
-      .or(`cuenta_id.in.(${ids.join(',')}),cuenta_destino_id.in.(${ids.join(',')}),inversion_id.in.(${invs.map((i) => i.id).join(',')})`)
-      .order('fecha', { ascending: false }),
-  ])
-  const lista = (revisar(movs) as Movimiento[]).map((m) => ({ ...m, monto_centavos: Number(m.monto_centavos) }))
+  const cuentas = await listarCuentas(true)
   return invs.map((inv) => {
     const cuenta = cuentas.find((c) => c.id === inv.cuenta_id)
-    const propios = lista.filter((m) => m.cuenta_id === inv.cuenta_id || m.cuenta_destino_id === inv.cuenta_id || m.inversion_id === inv.id)
+    const propios = consultar<Movimiento>(
+      `SELECT ${COLUMNAS_MOV} FROM movimientos WHERE cuenta_id = ? OR cuenta_destino_id = ? OR inversion_id = ? ORDER BY fecha DESC`,
+      [inv.cuenta_id, inv.cuenta_id, inv.id],
+    )
     let aportado = cuenta?.saldo_inicial_centavos ?? 0
     let rendimientos = 0
     let rendimientosFuera = 0
@@ -899,27 +899,41 @@ export interface NuevaInversion {
   cuenta_origen_id: string | null
 }
 
+/** Crea la inversión con su propia cuenta y, si sale de otra cuenta, la transferencia. Todo o nada. */
 export async function crearInversion(p: NuevaInversion): Promise<string> {
-  return revisar(await supabase.rpc('crear_inversion', { p })) as string
+  if (p.monto_centavos < 0) throw new Error('Monto no válido')
+  if (p.cuenta_origen_id) {
+    const origen = uno<{ moneda: string }>('SELECT moneda FROM cuentas WHERE id = ?', [p.cuenta_origen_id])
+    if (!origen || origen.moneda !== p.moneda) throw new Error('La cuenta de origen debe estar en la misma moneda que la inversión')
+  }
+  return transaccion(async () => {
+    const cuenta = await insertar('cuentas', {
+      nombre: p.nombre, tipo: 'inversion', moneda: p.moneda, saldo_inicial_centavos: p.cuenta_origen_id ? 0 : p.monto_centavos,
+    })
+    const id = await insertar('inversiones', {
+      nombre: p.nombre, tipo: p.tipo, entidad: p.entidad?.trim() || null, moneda: p.moneda, cuenta_id: cuenta, tasa_anual: p.tasa_anual,
+      fecha_inicio: p.fecha_inicio, fecha_vencimiento: p.fecha_vencimiento, nota: p.nota?.trim() || null,
+    })
+    if (p.cuenta_origen_id && p.monto_centavos > 0) {
+      await insertar('movimientos', {
+        tipo: 'transferencia', monto_centavos: p.monto_centavos, cuenta_id: p.cuenta_origen_id, cuenta_destino_id: cuenta,
+        fecha: p.fecha_inicio, nota: `Inversión: ${p.nombre}`,
+      })
+    }
+    return id
+  })
 }
 
 export async function actualizarInversion(id: string, cambios: Partial<Pick<Inversion, 'nombre' | 'entidad' | 'tasa_anual' | 'fecha_vencimiento' | 'nota'>>) {
-  revisar(await supabase.from('inversiones').update(cambios).eq('id', id))
+  await actualizar('inversiones', id, cambios)
 }
 
 /** Cierra la inversión y archiva su cuenta (el historial se conserva). */
 export async function cerrarInversion(inv: Inversion, cerrar = true) {
-  revisar(await supabase.from('inversiones').update({ estado: cerrar ? 'cerrada' : 'activa' }).eq('id', inv.id))
-  await archivarCuenta(inv.cuenta_id, cerrar)
-}
-
-async function categoriaId(nombre: string, tipo: 'ingreso' | 'gasto'): Promise<string> {
-  const existente = revisar(
-    await supabase.from('categorias').select('id').eq('tipo', tipo).eq('nombre', nombre).maybeSingle(),
-  ) as { id: string } | null
-  if (existente) return existente.id
-  const nueva = revisar(await supabase.from('categorias').insert({ nombre, tipo }).select('id').single()) as { id: string }
-  return nueva.id
+  await transaccion(async () => {
+    await actualizar('inversiones', inv.id, { estado: cerrar ? 'cerrada' : 'activa' })
+    await archivarCuenta(inv.cuenta_id, cerrar)
+  })
 }
 
 export type OperacionInversion =
@@ -929,51 +943,30 @@ export type OperacionInversion =
   | { tipo: 'valor'; valor_centavos: number; fecha: string; nota?: string | null }
 
 export async function operarInversion(inv: InversionConValor, op: OperacionInversion) {
-  const base = { fecha: op.fecha, nota: op.nota || null }
-  let fila: Record<string, unknown>
-  if (op.tipo === 'depositar' || op.tipo === 'retirar') {
-    const desde = op.tipo === 'depositar' ? op.cuenta_id : inv.cuenta_id
-    const hacia = op.tipo === 'depositar' ? inv.cuenta_id : op.cuenta_id
-    fila = {
-      ...base, tipo: 'transferencia', monto_centavos: op.monto_centavos, cuenta_id: desde, cuenta_destino_id: hacia,
-      nota: base.nota ?? `${op.tipo === 'depositar' ? 'Depósito a' : 'Retiro de'} ${inv.nombre}`,
+  await transaccion(async () => {
+    const base = { fecha: op.fecha, nota: op.nota || null }
+    if (op.tipo === 'depositar' || op.tipo === 'retirar') {
+      const desde = op.tipo === 'depositar' ? op.cuenta_id : inv.cuenta_id
+      const hacia = op.tipo === 'depositar' ? inv.cuenta_id : op.cuenta_id
+      await insertar('movimientos', {
+        ...base, tipo: 'transferencia', monto_centavos: op.monto_centavos, cuenta_id: desde, cuenta_destino_id: hacia,
+        nota: base.nota ?? `${op.tipo === 'depositar' ? 'Depósito a' : 'Retiro de'} ${inv.nombre}`,
+      })
+    } else if (op.tipo === 'rendimiento') {
+      await insertar('movimientos', {
+        ...base, tipo: 'ingreso', monto_centavos: op.monto_centavos, cuenta_id: op.cuenta_id,
+        categoria_id: await categoriaId('Rendimientos de inversiones', 'ingreso'),
+        origen: 'inversion_rendimiento', inversion_id: inv.id, nota: base.nota ?? `Rendimiento ${inv.nombre}`,
+      })
+    } else {
+      const diferencia = op.valor_centavos - inv.valor_centavos
+      if (diferencia === 0) return
+      const sube = diferencia > 0
+      await insertar('movimientos', {
+        ...base, tipo: sube ? 'ingreso' : 'gasto', monto_centavos: Math.abs(diferencia), cuenta_id: inv.cuenta_id,
+        categoria_id: await categoriaId(sube ? 'Rendimientos de inversiones' : 'Pérdida en inversiones', sube ? 'ingreso' : 'gasto'),
+        origen: 'inversion_ajuste', inversion_id: inv.id, nota: base.nota ?? `Actualización de valor de ${inv.nombre}`,
+      })
     }
-  } else if (op.tipo === 'rendimiento') {
-    fila = {
-      ...base, tipo: 'ingreso', monto_centavos: op.monto_centavos, cuenta_id: op.cuenta_id,
-      categoria_id: await categoriaId('Rendimientos de inversiones', 'ingreso'),
-      origen: 'inversion_rendimiento', inversion_id: inv.id, nota: base.nota ?? `Rendimiento ${inv.nombre}`,
-    }
-  } else {
-    const diferencia = op.valor_centavos - inv.valor_centavos
-    if (diferencia === 0) return
-    const sube = diferencia > 0
-    fila = {
-      ...base, tipo: sube ? 'ingreso' : 'gasto', monto_centavos: Math.abs(diferencia), cuenta_id: inv.cuenta_id,
-      categoria_id: await categoriaId(sube ? 'Rendimientos de inversiones' : 'Pérdida en inversiones', sube ? 'ingreso' : 'gasto'),
-      origen: 'inversion_ajuste', inversion_id: inv.id, nota: base.nota ?? `Actualización de valor de ${inv.nombre}`,
-    }
-  }
-  revisar(await supabase.from('movimientos').insert(fila))
-}
-
-/** Todos los pagos y cargos de deudas desde una fecha (para reportes). */
-export async function listarPagosDeudaDesde(desde: string): Promise<PagoDeuda[]> {
-  const filas = revisar(
-    await supabase.from('pagos_deuda').select('id,deuda_id,tipo,fecha,monto_centavos,interes_centavos,cuenta_id,nota').gte('fecha', desde),
-  ) as PagoDeuda[]
-  return filas.map((p) => ({ ...p, monto_centavos: Number(p.monto_centavos), interes_centavos: Number(p.interes_centavos) }))
-}
-
-/** Crea la cuenta de una tarjeta de crédito (saldo negativo = lo que se debe) y devuelve su id. */
-export async function crearCuentaTarjeta(nombre: string, debeCentavos: number): Promise<string> {
-  const fila = revisar(
-    await supabase.from('cuentas').insert({ nombre, tipo: 'tarjeta', moneda: 'DOP', saldo_inicial_centavos: -debeCentavos }).select('id').single(),
-  ) as { id: string }
-  return fila.id
-}
-
-/** Borra una cuenta (solo funciona si no tiene movimientos). */
-export async function borrarCuenta(id: string) {
-  revisar(await supabase.from('cuentas').delete().eq('id', id))
+  })
 }

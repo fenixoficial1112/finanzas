@@ -10,30 +10,34 @@
     "preview": "vite preview",
     "escritorio": "vite build --mode escritorio && electron .",
     "build:escritorio": "vite build --mode escritorio",
-    "dist:win": "vite build --mode escritorio && electron-builder --win nsis --x64 --publish never"
+    "dist:win": "vite build --mode escritorio && electron-builder --win nsis --x64 --publish never",
+    "probar:bd": "node scripts/probar-esquema.cjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.119.0",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "react-router-dom": "^7.18.5"
+    "@anthropic-ai/sdk": "^1.8.0",
+    "sql.js": "^1.13.0"
   },
   "devDependencies": {
+    "@fontsource/inter": "^5.3.0",
     "@tailwindcss/vite": "^4.3.5",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/sql.js": "^1.4.11",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "^45.3.2",
     "electron-builder": "^26.18.0",
     "oxlint": "^1.90.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5",
     "tailwindcss": "^4.3.5",
     "typescript": "~7.0.2",
     "vite": "^8.3.6",
     "vite-plugin-pwa": "^2.0.0"
   },
   "productName": "FENIX APP",
-  "description": "Finanzas personales para conductores de InDrive y Uber",
+  "description": "Finanzas personales para conductores de InDrive y Uber (datos guardados en la PC)",
   "author": "FENIX APP",
   "main": "electron/main.cjs",
   "build": {
@@ -47,14 +51,6 @@
       "dist/**/*",
       "electron/**/*",
       "package.json"
-    ],
-    "protocols": [
-      {
-        "name": "FENIX APP",
-        "schemes": [
-          "fenixapp"
-        ]
-      }
     ],
     "win": {
       "target": [
