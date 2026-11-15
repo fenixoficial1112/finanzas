@@ -6,7 +6,7 @@ import { fechaLarga, hoyISO, mesActual, nombreMes, rangoMes } from '../lib/fecha
 import { resumir } from '../lib/resumen'
 import { useDatos } from '../lib/useDatos'
 import { useMeta } from '../lib/useMeta'
-import { proximoPago } from '../lib/deudas'
+import { proximoPagoDeuda } from '../lib/deudas'
 import { avance, gastoPorCategoria } from '../lib/presupuesto'
 import { estadoMeta, TEXTO_RITMO } from '../lib/metas'
 import { diasParaVencer } from '../lib/inversiones'
@@ -39,19 +39,27 @@ export default function Inicio() {
   }, [mes])
   const hoy = new Date()
   const alertasDeudas = (deudas.datos ?? [])
-    .filter((d) => !d.pagada && d.saldo_centavos > 0 && d.dia_pago)
+    .filter((d) => !d.pagada && d.saldo_centavos > 0 && d.frecuencia !== 'diaria' && proximoPagoDeuda(d, hoy))
     .map((d) => {
-      const prox = proximoPago(d.dia_pago!, hoy)
+      const prox = proximoPagoDeuda(d, hoy)!
       const dias = Math.round((prox.getTime() - new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()).getTime()) / 86_400_000)
-      // ¿Ya pagó en los últimos 20 días? Entonces no avisamos.
-      const pagoReciente = d.ultimo_pago && (hoy.getTime() - new Date(d.ultimo_pago + 'T12:00:00').getTime()) / 86_400_000 < 20
+      // ¿Ya pagó en este periodo? Entonces no avisamos.
+      const ventana = d.frecuencia === 'semanal' ? 4 : d.frecuencia === 'quincenal' ? 9 : 20
+      const pagoReciente = d.ultimo_pago && (hoy.getTime() - new Date(d.ultimo_pago + 'T12:00:00').getTime()) / 86_400_000 < ventana
       return { d, dias, pagoReciente }
     })
-    .filter(({ dias, pagoReciente }) => dias <= 5 && !pagoReciente)
+    .filter(({ d, dias, pagoReciente }) => dias <= (d.frecuencia === 'semanal' ? 1 : 5) && !pagoReciente)
     .map(({ d, dias }) => ({
       clave: d.id,
       estado: (dias <= 1 ? 'vencido' : 'pronto') as 'vencido' | 'pronto',
       texto: `Pago ${d.nombre}: ${dias === 0 ? 'hoy' : dias === 1 ? 'mañana' : `en ${dias} días`}${d.cuota_centavos ? ` (${formatear(d.cuota_centavos)})` : ''}`,
+    }))
+  const alertasTarjetas = (deudas.datos ?? [])
+    .filter((d) => !d.pagada && d.limite_credito_centavos && d.saldo_centavos / d.limite_credito_centavos >= 0.8)
+    .map((d) => ({
+      clave: `uso-${d.id}`,
+      estado: (d.saldo_centavos >= d.limite_credito_centavos! ? 'vencido' : 'pronto') as 'vencido' | 'pronto',
+      texto: `${d.nombre}: usas el ${Math.round((d.saldo_centavos / d.limite_credito_centavos!) * 100)}% del límite`,
     }))
 
   const v = vehiculo.datos
@@ -88,7 +96,7 @@ export default function Inicio() {
       estado: (dias! < 0 ? 'vencido' : 'pronto') as 'vencido' | 'pronto',
       texto: dias! < 0 ? `${i.nombre}: venció, decide si renovar o retirar` : `${i.nombre}: vence en ${dias} días`,
     }))
-  const todasAlertas = [...alertasDeudas, ...alertasPresupuesto, ...alertasInversiones, ...alertas]
+  const todasAlertas = [...alertasDeudas, ...alertasTarjetas, ...alertasPresupuesto, ...alertasInversiones, ...alertas]
 
   const lista = cuentas.datos ?? []
   const tasaUSD = tasa.datos ?? null

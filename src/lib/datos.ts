@@ -510,7 +510,7 @@ export const NOMBRES_DEUDA: Record<TipoDeuda, string> = {
   tarjeta: 'Tarjeta de crédito',
   prestamo_personal: 'Préstamo personal',
   prestamo_vehiculo: 'Préstamo del vehículo',
-  prestamista: 'Prestamista',
+  prestamista: 'Prestamista / préstamo callejero',
   familiar: 'Familiar / amigo',
   tienda: 'Tienda / financiamiento',
   otro: 'Otro',
@@ -528,6 +528,20 @@ export interface Deuda {
   incluir_en_meta: boolean
   pagada: boolean
   creado_en?: string
+  frecuencia: FrecuenciaPago
+  dia_pago_2: number | null
+  dia_semana: number | null
+  limite_credito_centavos: number | null
+  dia_corte: number | null
+  cuenta_tarjeta_id: string | null
+}
+
+export type FrecuenciaPago = 'mensual' | 'quincenal' | 'semanal' | 'diaria'
+export const NOMBRES_FRECUENCIA: Record<FrecuenciaPago, string> = {
+  mensual: 'Mensual',
+  quincenal: 'Quincenal (2 veces al mes)',
+  semanal: 'Semanal',
+  diaria: 'Diaria',
 }
 
 export interface DeudaConEstado extends Deuda {
@@ -551,7 +565,7 @@ export interface PagoDeuda {
 
 export async function listarDeudas(): Promise<DeudaConEstado[]> {
   const [ds, est] = await Promise.all([
-    supabase.from('deudas').select('id,nombre,tipo,acreedor,saldo_inicial_centavos,tasa_anual,cuota_centavos,dia_pago,incluir_en_meta,pagada,creado_en').order('creado_en'),
+    supabase.from('deudas').select('id,nombre,tipo,acreedor,saldo_inicial_centavos,tasa_anual,cuota_centavos,dia_pago,incluir_en_meta,pagada,creado_en,frecuencia,dia_pago_2,dia_semana,limite_credito_centavos,dia_corte,cuenta_tarjeta_id').order('creado_en'),
     supabase.from('deudas_estado').select('*'),
   ])
   const estados = new Map((revisar(est) as Record<string, unknown>[]).map((e) => [e.deuda_id as string, e]))
@@ -562,6 +576,8 @@ export async function listarDeudas(): Promise<DeudaConEstado[]> {
       saldo_inicial_centavos: Number(d.saldo_inicial_centavos),
       tasa_anual: Number(d.tasa_anual),
       cuota_centavos: Number(d.cuota_centavos),
+      frecuencia: d.frecuencia ?? 'mensual',
+      limite_credito_centavos: d.limite_credito_centavos == null ? null : Number(d.limite_credito_centavos),
       saldo_centavos: Number(e.saldo_centavos ?? d.saldo_inicial_centavos),
       pagado_centavos: Number(e.pagado_centavos ?? 0),
       intereses_pagados_centavos: Number(e.intereses_pagados_centavos ?? 0),
@@ -941,4 +957,17 @@ export async function listarPagosDeudaDesde(desde: string): Promise<PagoDeuda[]>
     await supabase.from('pagos_deuda').select('id,deuda_id,tipo,fecha,monto_centavos,interes_centavos,cuenta_id,nota').gte('fecha', desde),
   ) as PagoDeuda[]
   return filas.map((p) => ({ ...p, monto_centavos: Number(p.monto_centavos), interes_centavos: Number(p.interes_centavos) }))
+}
+
+/** Crea la cuenta de una tarjeta de crédito (saldo negativo = lo que se debe) y devuelve su id. */
+export async function crearCuentaTarjeta(nombre: string, debeCentavos: number): Promise<string> {
+  const fila = revisar(
+    await supabase.from('cuentas').insert({ nombre, tipo: 'tarjeta', moneda: 'DOP', saldo_inicial_centavos: -debeCentavos }).select('id').single(),
+  ) as { id: string }
+  return fila.id
+}
+
+/** Borra una cuenta (solo funciona si no tiene movimientos). */
+export async function borrarCuenta(id: string) {
+  revisar(await supabase.from('cuentas').delete().eq('id', id))
 }

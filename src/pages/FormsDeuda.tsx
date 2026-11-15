@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { Aviso, Campo, btnPrincipal, inputCls } from '../components/ui'
 import {
-  NOMBRES_DEUDA, guardarDeuda, guardarPagoDeuda, type CuentaConSaldo, type Deuda, type DeudaConEstado, type TipoDeuda,
+  NOMBRES_DEUDA, NOMBRES_FRECUENCIA, borrarCuenta, crearCuentaTarjeta, guardarDeuda, guardarPagoDeuda, type CuentaConSaldo, type Deuda,
+  type DeudaConEstado, type FrecuenciaPago, type TipoDeuda,
 } from '../lib/datos'
-import { interesMensual } from '../lib/deudas'
+import { cuotaMensual, interesMensual, tasaAnual, type PeriodoTasa } from '../lib/deudas'
 import { aCentavos, aTexto, formatear } from '../lib/dinero'
 import { hoyISO } from '../lib/fechas'
 
@@ -23,71 +24,176 @@ function tasaDesdeCuota(saldo: number, cuota: number, meses: number): number | n
   return Math.round(((bajo + alto) / 2) * 100) / 100
 }
 
-export function FormDeuda({ deuda, onListo }: { deuda: DeudaConEstado | null; onListo: () => void }) {
+export function FormDeuda({ deuda, cuentas, onListo }: { deuda: DeudaConEstado | null; cuentas: CuentaConSaldo[]; onListo: () => void }) {
   const [nombre, setNombre] = useState(deuda?.nombre ?? '')
   const [tipo, setTipo] = useState<TipoDeuda>(deuda?.tipo ?? 'tarjeta')
   const [acreedor, setAcreedor] = useState(deuda?.acreedor ?? '')
-  const [saldo, setSaldo] = useState(deuda ? aTexto(deuda.saldo_inicial_centavos) : '')
+  const [saldo, setSaldo] = useState(deuda ? aTexto(deuda.cuenta_tarjeta_id ? deuda.saldo_centavos : deuda.saldo_inicial_centavos) : '')
   const [tasa, setTasa] = useState(deuda ? String(deuda.tasa_anual) : '')
-  const [periodo, setPeriodo] = useState<'anual' | 'mensual'>('anual')
+  const [periodo, setPeriodo] = useState<PeriodoTasa>('anual')
+  const [frecuencia, setFrecuencia] = useState<FrecuenciaPago>(deuda?.frecuencia ?? 'mensual')
   const [cuota, setCuota] = useState(deuda ? aTexto(deuda.cuota_centavos) : '')
   const [dia, setDia] = useState(deuda?.dia_pago ? String(deuda.dia_pago) : '')
+  const [dia2, setDia2] = useState(deuda?.dia_pago_2 ? String(deuda.dia_pago_2) : '')
+  const [diaSemana, setDiaSemana] = useState(deuda?.dia_semana != null ? String(deuda.dia_semana) : '1')
+  const [limite, setLimite] = useState(deuda?.limite_credito_centavos ? aTexto(deuda.limite_credito_centavos) : '')
+  const [corte, setCorte] = useState(deuda?.dia_corte ? String(deuda.dia_corte) : '')
+  // Tarjeta: '' = sin vincular, 'nueva' = crear la cuenta, o el id de una cuenta tipo tarjeta existente.
+  const tarjetasLibres = cuentas.filter((c) => c.tipo === 'tarjeta' && c.moneda === 'DOP' && !c.archivada)
+  const [vinculo, setVinculo] = useState(deuda ? deuda.cuenta_tarjeta_id ?? '' : 'nueva')
   const [enMeta, setEnMeta] = useState(deuda?.incluir_en_meta ?? true)
   const [plazo, setPlazo] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
 
-  const esPrestamo = tipo !== 'tarjeta'
+  const esTarjeta = tipo === 'tarjeta'
+  const vinculada = esTarjeta && vinculo !== ''
+  const esPrestamo = !esTarjeta && frecuencia === 'mensual'
   const tasaCalculada = plazo ? tasaDesdeCuota(aCentavos(saldo) ?? 0, aCentavos(cuota) ?? 0, Number(plazo)) : null
+  const tasaNum = Number((tasa || '0').replace(',', '.'))
+  const anualVista = tasaNum > 0 && periodo !== 'anual' ? tasaAnual(tasaNum, periodo) : null
+  const c = aCentavos(cuota) ?? 0
+  const s = aCentavos(saldo) ?? 0
+  const interesMes = s && tasaNum ? interesMensual(s, periodo === 'anual' ? tasaNum : tasaAnual(tasaNum, periodo)) : 0
+  const mensual = cuotaMensual(c, frecuencia)
 
   async function guardar(e: FormEvent) {
     e.preventDefault()
-    const s = aCentavos(saldo)
-    const c = cuota.trim() ? aCentavos(cuota) : 0
-    const t = Number((tasa || '0').replace(',', '.'))
-    if (s === null) return setError('Escribe el saldo que debes.')
-    if (c === null) return setError('Escribe una cuota válida.')
-    if (!(t >= 0)) return setError('Escribe una tasa válida.')
-    const tasaAnual = periodo === 'mensual' ? t * 12 : t
+    const sc = aCentavos(saldo)
+    const cc = cuota.trim() ? aCentavos(cuota) : 0
+    if (sc === null) return setError('Escribe el saldo que debes.')
+    if (cc === null) return setError('Escribe una cuota válida.')
+    if (!(tasaNum >= 0)) return setError('Escribe una tasa válida.')
+    if (frecuencia === 'quincenal' && (!dia || !dia2)) return setError('Pon los dos días del mes en que pagas (ej.: 15 y 30).')
+    const anual = Math.round(tasaAnual(tasaNum, periodo) * 100) / 100
+    if (anual > 1000) return setError('Esa tasa es demasiado alta; revisa el número y el periodo.')
+    const lim = limite.trim() ? aCentavos(limite) : null
+    if (limite.trim() && !lim) return setError('Escribe un límite de crédito válido.')
     setGuardando(true)
+    let cuentaCreada: string | null = null
     try {
+      let cuentaTarjeta: string | null = null
+      if (esTarjeta && vinculo === 'nueva') cuentaTarjeta = cuentaCreada = await crearCuentaTarjeta(nombre.trim(), sc)
+      else if (esTarjeta && vinculo) cuentaTarjeta = vinculo
       await guardarDeuda({
-        nombre: nombre.trim(), tipo, acreedor: acreedor.trim() || null, saldo_inicial_centavos: s,
-        tasa_anual: Math.round(tasaAnual * 100) / 100, cuota_centavos: c, dia_pago: dia ? Number(dia) : null, incluir_en_meta: enMeta,
+        nombre: nombre.trim(), tipo, acreedor: acreedor.trim() || null,
+        saldo_inicial_centavos: cuentaTarjeta ? 0 : sc,
+        tasa_anual: anual, cuota_centavos: cc,
+        frecuencia: esTarjeta ? 'mensual' : frecuencia,
+        dia_pago: frecuencia === 'semanal' || frecuencia === 'diaria' ? null : dia ? Number(dia) : null,
+        dia_pago_2: frecuencia === 'quincenal' && dia2 ? Number(dia2) : null,
+        dia_semana: frecuencia === 'semanal' ? Number(diaSemana) : null,
+        limite_credito_centavos: esTarjeta ? lim : null,
+        dia_corte: esTarjeta && corte ? Number(corte) : null,
+        cuenta_tarjeta_id: cuentaTarjeta,
+        incluir_en_meta: enMeta,
       } satisfies Omit<Deuda, 'id' | 'pagada' | 'creado_en'>, deuda?.id)
       onListo()
     } catch (err) {
+      // Si la deuda no se pudo guardar, no dejamos la cuenta de la tarjeta suelta.
+      if (cuentaCreada) await borrarCuenta(cuentaCreada).catch(() => undefined)
       setError(err instanceof Error ? err.message : String(err))
       setGuardando(false)
     }
   }
 
+  const soloDias = (v: string) => v.replace(/\D/g, '').slice(0, 2)
+
   return (
     <form onSubmit={guardar} className="grid gap-4 sm:grid-cols-2">
-      <Campo etiqueta="Nombre"><input required value={nombre} onChange={(e) => setNombre(e.target.value)} className={inputCls} placeholder="Ej.: Tarjeta Popular" /></Campo>
+      <Campo etiqueta="Nombre"><input required value={nombre} onChange={(e) => setNombre(e.target.value)} className={inputCls} placeholder={esTarjeta ? 'Ej.: Tarjeta Popular' : 'Ej.: Préstamo de Juan'} /></Campo>
       <Campo etiqueta="Tipo">
-        <select value={tipo} onChange={(e) => setTipo(e.target.value as TipoDeuda)} className={inputCls}>
+        <select value={tipo} disabled={!!deuda?.cuenta_tarjeta_id} onChange={(e) => setTipo(e.target.value as TipoDeuda)} className={inputCls}>
           {Object.entries(NOMBRES_DEUDA).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
         </select>
       </Campo>
-      <Campo etiqueta={deuda ? 'Saldo al registrarla (RD$)' : 'Cuánto debes hoy (RD$)'} ayuda={deuda ? 'Los pagos y cargos se suman aparte.' : undefined}>
-        <input inputMode="decimal" required value={saldo} onChange={(e) => setSaldo(e.target.value)} className={inputCls} placeholder="0.00" />
+
+      {esTarjeta && (
+        <div className="sm:col-span-2 rounded-xl bg-gray-50 border border-borde p-4 grid gap-4 sm:grid-cols-3">
+          <div className="sm:col-span-3">
+            <Campo etiqueta="Cómo llevar esta tarjeta" ayuda={vinculada
+              ? 'Registra cada compra como un gasto con la cuenta de la tarjeta. Pagarla será una transferencia desde tu banco o efectivo, sin contar el gasto dos veces.'
+              : 'Solo anotarás pagos y cargos; las compras no se registran por separado.'}>
+              <select value={vinculo} disabled={!!deuda?.cuenta_tarjeta_id} onChange={(e) => setVinculo(e.target.value)} className={inputCls}>
+                {!deuda && <option value="nueva">Crear una cuenta para registrar mis compras (recomendado)</option>}
+                {tarjetasLibres.map((t) => <option key={t.id} value={t.id}>Usar mi cuenta “{t.nombre}”</option>)}
+                <option value="">Solo llevar el saldo de la deuda</option>
+              </select>
+            </Campo>
+          </div>
+          <Campo etiqueta="Límite de crédito (RD$)"><input inputMode="decimal" value={limite} onChange={(e) => setLimite(e.target.value)} className={inputCls} placeholder="Ej.: 100,000" /></Campo>
+          <Campo etiqueta="Día de corte"><input inputMode="numeric" value={corte} onChange={(e) => setCorte(soloDias(e.target.value))} className={inputCls} placeholder="Ej.: 2" /></Campo>
+          <Campo etiqueta="Fecha límite de pago (día)"><input inputMode="numeric" value={dia} onChange={(e) => setDia(soloDias(e.target.value))} className={inputCls} placeholder="Ej.: 17" /></Campo>
+        </div>
+      )}
+
+      <Campo
+        etiqueta={vinculada && deuda?.cuenta_tarjeta_id ? 'Lo que debes hoy (RD$)' : deuda && !vinculada ? 'Saldo al registrarla (RD$)' : 'Cuánto debes hoy (RD$)'}
+        ayuda={deuda?.cuenta_tarjeta_id ? 'Se calcula solo con tus compras, pagos y cargos.' : deuda ? 'Los pagos y cargos se suman aparte.' : undefined}
+      >
+        <input inputMode="decimal" required disabled={!!deuda?.cuenta_tarjeta_id} value={saldo} onChange={(e) => setSaldo(e.target.value)} className={inputCls} placeholder="0.00" />
       </Campo>
-      <Campo etiqueta={tipo === 'tarjeta' ? 'Pago mínimo al mes (RD$)' : 'Cuota al mes (RD$)'}>
+
+      {!esTarjeta && (
+        <Campo etiqueta="¿Cada cuánto pagas?">
+          <select value={frecuencia} onChange={(e) => setFrecuencia(e.target.value as FrecuenciaPago)} className={inputCls}>
+            {Object.entries(NOMBRES_FRECUENCIA).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+          </select>
+        </Campo>
+      )}
+
+      <Campo etiqueta={esTarjeta ? 'Pago mínimo al mes (RD$)' : `Cuota por pago (RD$)`}
+        ayuda={!esTarjeta && frecuencia !== 'mensual' && c > 0 ? `Equivale a ${formatear(mensual)} al mes.` : undefined}>
         <input inputMode="decimal" value={cuota} onChange={(e) => setCuota(e.target.value)} className={inputCls} placeholder="0.00" />
       </Campo>
-      <Campo etiqueta="Tasa de interés (%)" ayuda="Está en tu estado de cuenta o contrato. Si es un familiar sin interés, pon 0.">
+
+      {!esTarjeta && frecuencia === 'mensual' && (
+        <Campo etiqueta="Día de pago (1–31)"><input inputMode="numeric" value={dia} onChange={(e) => setDia(soloDias(e.target.value))} className={inputCls} placeholder="Ej.: 17" /></Campo>
+      )}
+      {!esTarjeta && frecuencia === 'quincenal' && (
+        <Campo etiqueta="Días de pago">
+          <div className="flex gap-2">
+            <input aria-label="Primer día" inputMode="numeric" value={dia} onChange={(e) => setDia(soloDias(e.target.value))} className={inputCls} placeholder="15" />
+            <input aria-label="Segundo día" inputMode="numeric" value={dia2} onChange={(e) => setDia2(soloDias(e.target.value))} className={inputCls} placeholder="30" />
+          </div>
+        </Campo>
+      )}
+      {!esTarjeta && frecuencia === 'semanal' && (
+        <Campo etiqueta="Día de la semana">
+          <select value={diaSemana} onChange={(e) => setDiaSemana(e.target.value)} className={inputCls}>
+            {['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'].map((n, i) => <option key={n} value={i}>{n}</option>)}
+          </select>
+        </Campo>
+      )}
+
+      <Campo etiqueta="Tasa de interés (%)" ayuda="La del contrato o estado de cuenta. En préstamos callejeros suele ser “X% mensual” o “X% por quincena”. Si es un familiar sin interés, pon 0.">
         <div className="flex gap-2">
-          <input inputMode="decimal" value={tasa} onChange={(e) => setTasa(e.target.value)} className={inputCls} placeholder="Ej.: 60" />
-          <select aria-label="Periodo de la tasa" value={periodo} onChange={(e) => setPeriodo(e.target.value as 'anual' | 'mensual')} className={`${inputCls} w-32`}>
+          <input inputMode="decimal" value={tasa} onChange={(e) => setTasa(e.target.value)} className={inputCls} placeholder="Ej.: 20" />
+          <select aria-label="Periodo de la tasa" value={periodo} onChange={(e) => setPeriodo(e.target.value as PeriodoTasa)} className={`${inputCls} w-36`}>
             <option value="anual">anual</option>
             <option value="mensual">mensual</option>
+            <option value="quincenal">quincenal</option>
+            <option value="semanal">semanal</option>
+            <option value="diaria">diaria</option>
           </select>
         </div>
       </Campo>
-      <Campo etiqueta="Día de pago (1–31)">
-        <input inputMode="numeric" value={dia} onChange={(e) => setDia(e.target.value.replace(/\D/g, '').slice(0, 2))} className={inputCls} placeholder="Ej.: 17" />
-      </Campo>
+      {(anualVista || (interesMes > 0 && mensual > 0)) && (
+        <div className="sm:col-span-2 space-y-2">
+          {anualVista != null && (
+            <p className={`text-sm rounded-lg px-3 py-2 ${anualVista >= 60 ? 'bg-red-50 text-peligro' : 'bg-gray-50 text-suave'}`}>
+              {tasaNum}% {periodo} equivale a <b>{Math.round(anualVista)}% al año</b>.
+              {anualVista >= 60 && ' Es un préstamo muy caro: conviene salir de él primero.'}
+            </p>
+          )}
+          {interesMes > 0 && mensual > 0 && mensual <= interesMes && (
+            <p className="text-sm rounded-lg px-3 py-2 bg-red-50 text-peligro">
+              Pagas {formatear(mensual)} al mes y los intereses son {formatear(interesMes)}: <b>solo cubres réditos, el capital no baja</b>. Necesitas abonar a capital para salir.
+            </p>
+          )}
+        </div>
+      )}
+
       {esPrestamo && (
         <div className="sm:col-span-2 rounded-xl bg-gray-50 border border-borde p-3 space-y-2">
           <p className="text-sm font-semibold">¿No sabes la tasa? Te la calculo</p>
@@ -107,7 +213,7 @@ export function FormDeuda({ deuda, onListo }: { deuda: DeudaConEstado | null; on
           </div>
         </div>
       )}
-      <Campo etiqueta="Acreedor (opcional)"><input value={acreedor} onChange={(e) => setAcreedor(e.target.value)} className={inputCls} placeholder="Ej.: Banco Popular" /></Campo>
+      <Campo etiqueta="Acreedor (opcional)"><input value={acreedor} onChange={(e) => setAcreedor(e.target.value)} className={inputCls} placeholder="Ej.: Banco Popular, Don Pedro" /></Campo>
       <label className="flex items-center gap-2 text-sm self-end h-11">
         <input type="checkbox" checked={enMeta} onChange={(e) => setEnMeta(e.target.checked)} className="w-4 h-4" />
         Sumar la cuota a mi meta diaria
@@ -131,14 +237,16 @@ export function FormPago({ deuda, cuentas, sugerido, onListo }: {
   const [monto, setMonto] = useState(sugerido ? aTexto(sugerido) : '')
   const interesEstimado = interesMensual(deuda.saldo_centavos, deuda.tasa_anual)
   const [interes, setInteres] = useState(interesEstimado ? aTexto(interesEstimado) : '0')
-  const pesos = cuentas.filter((c) => c.moneda === 'DOP' && !c.archivada)
+  const pesos = cuentas.filter((c) => c.moneda === 'DOP' && !c.archivada && c.tipo !== 'tarjeta' && c.tipo !== 'inversion')
   const [cuenta, setCuenta] = useState(pesos.find((c) => c.tipo === 'efectivo')?.id ?? pesos[0]?.id ?? '')
   const [nota, setNota] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
 
   const m = aCentavos(monto) ?? 0
-  const i = Math.min(aCentavos(interes) ?? 0, m)
+  const vinculada = Boolean(deuda.cuenta_tarjeta_id)
+  // En tarjetas vinculadas los intereses se registran como "cargo"; el pago completo baja el saldo.
+  const i = vinculada ? 0 : Math.min(aCentavos(interes) ?? 0, m)
 
   async function guardar(e: FormEvent) {
     e.preventDefault()
@@ -162,21 +270,26 @@ export function FormPago({ deuda, cuentas, sugerido, onListo }: {
         {(['pago', 'cargo'] as const).map((t) => (
           <button key={t} type="button" role="radio" aria-checked={tipo === t} onClick={() => setTipo(t)}
             className={`h-10 rounded-lg text-sm font-semibold cursor-pointer ${tipo === t ? 'bg-white shadow-sm' : 'text-suave'}`}>
-            {t === 'pago' ? 'Hice un pago' : 'Nuevo cargo (compra, mora…)'}
+            {t === 'pago' ? 'Hice un pago' : vinculada ? 'Intereses o cargos del banco' : 'Nuevo cargo (compra, mora…)'}
           </button>
         ))}
       </div>
       <Campo etiqueta="Monto (RD$)"><input autoFocus inputMode="decimal" required value={monto} onChange={(e) => setMonto(e.target.value)} className={`${inputCls} text-lg font-semibold`} /></Campo>
       <Campo etiqueta="Fecha"><input type="date" required value={fecha} max={hoyISO()} onChange={(e) => setFecha(e.target.value)} className={inputCls} /></Campo>
+      {tipo === 'cargo' && vinculada && (
+        <p className="sm:col-span-2 text-sm text-suave">Se registra como gasto en la tarjeta (categoría “Intereses y cargos bancarios”). Las compras anótalas en Movimientos con la cuenta de la tarjeta.</p>
+      )}
       {tipo === 'pago' && (
         <>
-          <Campo etiqueta="De eso, intereses (RD$)" ayuda={`Estimado: ${formatear(interesEstimado)} este mes. Cópialo de tu estado de cuenta si lo tienes.`}>
-            <input inputMode="decimal" value={interes} onChange={(e) => setInteres(e.target.value)} className={inputCls} />
-          </Campo>
+          {!vinculada && (
+            <Campo etiqueta="De eso, intereses (RD$)" ayuda={`Estimado: ${formatear(interesEstimado)} este mes. Cópialo de tu estado de cuenta si lo tienes.`}>
+              <input inputMode="decimal" value={interes} onChange={(e) => setInteres(e.target.value)} className={inputCls} />
+            </Campo>
+          )}
           <Campo etiqueta="Pagado desde">
             <select value={cuenta} onChange={(e) => setCuenta(e.target.value)} className={inputCls}>
-              <option value="">No crear gasto</option>
-              {pesos.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              <option value="">{vinculada ? 'No mover dinero (solo anotar)' : 'No crear gasto'}</option>
+              {pesos.filter((c) => c.id !== deuda.cuenta_tarjeta_id).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </Campo>
           <p className="sm:col-span-2 text-sm text-suave">

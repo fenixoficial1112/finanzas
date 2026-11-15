@@ -55,6 +55,7 @@ export function saldosAl(fecha: string, cuentas: CuentaConSaldo[], movs: Movimie
 export function deudasAl(fecha: string, deudas: DeudaConEstado[], pagos: PagoDeuda[]): Map<string, number> {
   const res = new Map<string, number>()
   for (const d of deudas) {
+    if (d.cuenta_tarjeta_id) continue // ya cuenta como saldo negativo de su cuenta
     if (d.creado_en && d.creado_en.slice(0, 10) > fecha) continue
     let s = d.saldo_centavos
     for (const p of pagos) {

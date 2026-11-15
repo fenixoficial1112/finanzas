@@ -7,6 +7,7 @@ import {
 import { aCentavos, aTexto, formatear } from '../lib/dinero'
 import { mesActual, nombreMes } from '../lib/fechas'
 import { DIAS_HISTORIAL, useMeta } from '../lib/useMeta'
+import { cuotaMensual } from '../lib/deudas'
 
 export default function MetaDiaria() {
   const datos = useMeta()
@@ -116,7 +117,7 @@ export default function MetaDiaria() {
                     <p className="font-semibold text-sm">{d.nombre}</p>
                     <p className="text-xs text-suave">Cuota de deuda · automático desde <Link to="/deudas" className="text-marca font-semibold">Deudas</Link></p>
                   </div>
-                  <span className="font-semibold">{formatear(d.cuota_centavos)}</span>
+                  <span className="font-semibold">{formatear(cuotaMensual(d.cuota_centavos, d.frecuencia))}</span>
                 </li>
               ))}
               {aportesMetas.map((m) => (

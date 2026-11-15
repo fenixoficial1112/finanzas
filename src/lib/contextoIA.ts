@@ -5,7 +5,7 @@ import {
   listarMetas, listarMovimientos, listarPlataformas, listarPresupuestos, obtenerDatosVehiculo, obtenerUmbralAlerta, obtenerPlanDeudas, obtenerTasaUSD, totalesPorPlataforma,
   type CuentaConSaldo, type Movimiento,
 } from './datos'
-import { interesMensual, mesFuturo, simular, type DeudaSim, type ResultadoSim } from './deudas'
+import { cuotaMensual, interesMensual, mesFuturo, simular, textoFrecuencia, type DeudaSim, type ResultadoSim } from './deudas'
 import { enPesos } from './dinero'
 import { diasDelMes, haceDias, hoyISO, mesActual, nombreMes, rangoMes } from './fechas'
 import { cargarMeta, DIAS_HISTORIAL } from './useMeta'
@@ -94,7 +94,7 @@ export async function construirContexto() {
 
   // ----- Deudas -----
   const activas = deudas.filter((d) => !d.pagada && d.saldo_centavos > 0)
-  const sims: DeudaSim[] = activas.map((d) => ({ id: d.id, nombre: d.nombre, saldo: d.saldo_centavos, tasaAnual: d.tasa_anual, cuota: d.cuota_centavos }))
+  const sims: DeudaSim[] = activas.map((d) => ({ id: d.id, nombre: d.nombre, saldo: d.saldo_centavos, tasaAnual: d.tasa_anual, cuota: cuotaMensual(d.cuota_centavos, d.frecuencia) }))
   const extra = planDeudas.pago_extra_deudas_centavos
   const av = simular(sims, 'avalancha', extra)
   const bn = simular(sims, 'bola_nieve', extra)
@@ -147,7 +147,7 @@ export async function construirContexto() {
     },
     meta_diaria: {
       obligaciones_mensuales: meta.obligaciones.filter((o) => o.activa).map((o) => ({ nombre: o.nombre, tipo: NOMBRES_OBLIGACION[o.tipo], monto: rd(o.monto_centavos) })),
-      cuotas_de_deudas_incluidas: meta.cuotas.map((d) => ({ nombre: d.nombre, cuota: rd(d.cuota_centavos) })),
+      cuotas_de_deudas_incluidas: meta.cuotas.map((d) => ({ nombre: d.nombre, cuota_mensual: rd(cuotaMensual(d.cuota_centavos, d.frecuencia)) })),
       total_obligaciones_mes: rd(meta.totalMes),
       dias_trabajo_por_semana: meta.prefs.dias_trabajo_semana,
       margen_seguridad_pct: meta.prefs.margen_pct,
@@ -181,7 +181,7 @@ export async function construirContexto() {
     deudas: activas.length === 0 ? { activas: 0 } : {
       total: rd(activas.reduce((s, d) => s + d.saldo_centavos, 0)),
       intereses_este_mes: rd(activas.reduce((s, d) => s + interesMensual(d.saldo_centavos, d.tasa_anual), 0)),
-      cuotas_al_mes: rd(activas.reduce((s, d) => s + d.cuota_centavos, 0)),
+      cuotas_al_mes: rd(activas.reduce((s, d) => s + cuotaMensual(d.cuota_centavos, d.frecuencia), 0)),
       estrategia_elegida: planDeudas.estrategia_deudas === 'avalancha' ? 'avalancha' : 'bola de nieve',
       pago_extra_mensual: rd(extra),
       lista: elegido.orden.map((id, i) => {
@@ -189,8 +189,14 @@ export async function construirContexto() {
         const im = interesMensual(d.saldo_centavos, d.tasa_anual)
         return {
           prioridad: i + 1, nombre: d.nombre, tipo: NOMBRES_DEUDA[d.tipo], saldo: rd(d.saldo_centavos), tasa_anual_pct: d.tasa_anual,
-          cuota: rd(d.cuota_centavos), dia_de_pago: d.dia_pago, interes_mensual: rd(im),
-          cuota_no_cubre_intereses: d.tasa_anual > 0 && d.cuota_centavos <= im,
+          cuota_por_pago: rd(d.cuota_centavos), frecuencia: d.frecuencia, cuando_paga: textoFrecuencia(d),
+          cuota_mensual_equivalente: rd(cuotaMensual(d.cuota_centavos, d.frecuencia)), interes_mensual: rd(im),
+          cuota_no_cubre_intereses: d.tasa_anual > 0 && cuotaMensual(d.cuota_centavos, d.frecuencia) <= im,
+          ...(d.tipo === 'tarjeta' ? {
+            limite_credito: d.limite_credito_centavos ? rd(d.limite_credito_centavos) : null,
+            uso_del_limite_pct: d.limite_credito_centavos ? Math.round((d.saldo_centavos / d.limite_credito_centavos) * 100) : null,
+            dia_de_corte: d.dia_corte,
+          } : {}),
           pagar_este_mes_segun_plan: rd(elegido.planEsteMes[id] ?? 0),
           se_liquida_en: elegido.mesLiquidada[id] ? mesFuturo(elegido.mesLiquidada[id]!) : null,
         }

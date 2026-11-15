@@ -4,7 +4,9 @@ import {
   NOMBRES_DEUDA, borrarDeuda, borrarPagoDeuda, guardarPlanDeudas, listarCuentas, listarDeudas, listarPagosDeuda,
   marcarDeudaPagada, obtenerPlanDeudas, type DeudaConEstado,
 } from '../lib/datos'
-import { interesMensual, mesFuturo, proximoPago, simular, type DeudaSim, type ResultadoSim } from '../lib/deudas'
+import {
+  PAGOS_POR_MES, cuotaMensual, interesMensual, mesFuturo, proximoPagoDeuda, simular, textoFrecuencia, type DeudaSim, type ResultadoSim,
+} from '../lib/deudas'
 import { aCentavos, aTexto, formatear } from '../lib/dinero'
 import { fechaLarga } from '../lib/fechas'
 import { useDatos } from '../lib/useDatos'
@@ -34,7 +36,7 @@ export default function Deudas() {
   const extra = extraTxt !== null ? aCentavos(extraTxt) ?? 0 : extraGuardado
 
   const sims = useMemo(() => {
-    const ds: DeudaSim[] = (deudas.datos ?? []).filter((d) => !d.pagada && d.saldo_centavos > 0).map((d) => ({ id: d.id, nombre: d.nombre, saldo: d.saldo_centavos, tasaAnual: d.tasa_anual, cuota: d.cuota_centavos }))
+    const ds: DeudaSim[] = (deudas.datos ?? []).filter((d) => !d.pagada && d.saldo_centavos > 0).map((d) => ({ id: d.id, nombre: d.nombre, saldo: d.saldo_centavos, tasaAnual: d.tasa_anual, cuota: cuotaMensual(d.cuota_centavos, d.frecuencia) }))
     return {
       minimos: simular(ds, 'minimos', 0),
       avalancha: simular(ds, 'avalancha', extra),
@@ -60,8 +62,8 @@ export default function Deudas() {
 
   const total = activas.reduce((s, d) => s + d.saldo_centavos, 0)
   const interesesMes = activas.reduce((s, d) => s + interesMensual(d.saldo_centavos, d.tasa_anual), 0)
-  const cuotasMes = activas.reduce((s, d) => s + d.cuota_centavos, 0)
-  const atrapadas = activas.filter((d) => d.cuota_centavos <= interesMensual(d.saldo_centavos, d.tasa_anual) && d.tasa_anual > 0)
+  const cuotasMes = activas.reduce((s, d) => s + cuotaMensual(d.cuota_centavos, d.frecuencia), 0)
+  const atrapadas = activas.filter((d) => cuotaMensual(d.cuota_centavos, d.frecuencia) <= interesMensual(d.saldo_centavos, d.tasa_anual) && d.tasa_anual > 0)
   const ahorroVsMinimos = sims.minimos.meses != null && elegido.meses != null
     ? { intereses: sims.minimos.totalIntereses - elegido.totalIntereses, meses: sims.minimos.meses - elegido.meses }
     : null
@@ -170,6 +172,9 @@ export default function Deudas() {
                         <p className="text-xs font-semibold text-suave">{i === 0 ? 'ATACAR PRIMERO' : `Prioridad ${i + 1}`}</p>
                         <p className="font-semibold">{d.nombre}</p>
                         <p className="text-lg font-bold">{formatear(monto)}</p>
+                        {d.frecuencia !== 'mensual' && monto > 0 && (
+                          <p className="text-xs text-suave">≈ {formatear(Math.round(monto / PAGOS_POR_MES[d.frecuencia]))} {d.frecuencia === 'quincenal' ? 'por quincena' : d.frecuencia === 'semanal' ? 'por semana' : 'por día'}</p>
+                        )}
                       </li>
                     )
                   })}
@@ -191,7 +196,9 @@ export default function Deudas() {
               {lista.map((d) => {
                 const totalDeuda = d.saldo_inicial_centavos + d.cargos_centavos
                 const avance = totalDeuda > 0 ? Math.min(1, Math.max(0, 1 - d.saldo_centavos / totalDeuda)) : 1
-                const proximo = d.dia_pago ? proximoPago(d.dia_pago) : null
+                const proximo = proximoPagoDeuda(d)
+                const uso = d.limite_credito_centavos ? d.saldo_centavos / d.limite_credito_centavos : null
+                const colorUso = uso == null ? '' : uso > 0.7 ? 'bg-red-600' : uso > 0.3 ? 'bg-amber-500' : 'bg-marca'
                 const terminada = d.pagada || d.saldo_centavos <= 0
                 const mesFin = elegido.mesLiquidada[d.id]
                 return (
@@ -199,19 +206,42 @@ export default function Deudas() {
                     <div className="flex justify-between gap-3">
                       <div className="min-w-0">
                         <h3 className="font-semibold truncate">{d.nombre}</h3>
-                        <p className="text-xs text-suave">{NOMBRES_DEUDA[d.tipo]}{d.acreedor ? ` · ${d.acreedor}` : ''} · {d.tasa_anual}% anual</p>
+                        <p className="text-xs text-suave">
+                          {NOMBRES_DEUDA[d.tipo]}{d.acreedor ? ` · ${d.acreedor}` : ''} · {d.tasa_anual}% anual
+                          {d.tasa_anual >= 60 && <span className="text-peligro font-semibold"> ({Math.round((d.tasa_anual / 12) * 10) / 10}% al mes)</span>}
+                        </p>
                       </div>
                       <p className="text-xl font-bold whitespace-nowrap">{formatear(Math.max(0, d.saldo_centavos))}</p>
                     </div>
-                    <div className="h-2 rounded-full bg-gray-200" role="progressbar" aria-label={`Pagado de ${d.nombre}`} aria-valuenow={Math.round(avance * 100)} aria-valuemin={0} aria-valuemax={100}>
-                      <div className="h-2 rounded-full bg-marca" style={{ width: `${Math.max(1, avance * 100)}%` }} />
-                    </div>
+                    {d.tipo === 'tarjeta' && uso != null ? (
+                      <div className="space-y-1.5">
+                        <div className="h-2 rounded-full bg-gray-200" role="progressbar" aria-label={`Uso del límite de ${d.nombre}`} aria-valuenow={Math.round(uso * 100)} aria-valuemin={0} aria-valuemax={100}>
+                          <div className={`h-2 rounded-full ${colorUso}`} style={{ width: `${Math.min(100, Math.max(1, uso * 100))}%` }} />
+                        </div>
+                        <p className="text-xs text-suave">
+                          Usas el <b className={uso > 0.7 ? 'text-peligro' : 'text-tinta'}>{Math.round(uso * 100)}%</b> de {formatear(d.limite_credito_centavos!)} · disponible {formatear(Math.max(0, d.limite_credito_centavos! - d.saldo_centavos))}
+                          {d.dia_corte ? ` · corte el día ${d.dia_corte}` : ''}
+                        </p>
+                        {uso > 0.3 && <p className="text-xs text-amber-800">Trata de usar menos del 30% del límite: cuida tu historial de crédito y pagas menos intereses.</p>}
+                      </div>
+                    ) : d.cuenta_tarjeta_id ? null : (
+                      <div className="h-2 rounded-full bg-gray-200" role="progressbar" aria-label={`Pagado de ${d.nombre}`} aria-valuenow={Math.round(avance * 100)} aria-valuemin={0} aria-valuemax={100}>
+                        <div className="h-2 rounded-full bg-marca" style={{ width: `${Math.max(1, avance * 100)}%` }} />
+                      </div>
+                    )}
+                    {d.tipo === 'tarjeta' && !terminada && (
+                      <p className="text-xs rounded-lg bg-gray-50 px-3 py-2">
+                        Para <b>no pagar intereses</b>, paga el balance total del corte antes de la fecha límite. Pagar solo el mínimo ({formatear(d.cuota_centavos)}) es lo más caro.
+                      </p>
+                    )}
                     <div className="flex flex-wrap justify-between gap-2 text-xs text-suave">
-                      <span>{Math.round(avance * 100)}% pagado · intereses pagados {formatear(d.intereses_pagados_centavos)}</span>
+                      <span>
+                        {d.cuenta_tarjeta_id ? `Intereses y cargos ${formatear(d.intereses_pagados_centavos)}` : `${Math.round(avance * 100)}% pagado · intereses pagados ${formatear(d.intereses_pagados_centavos)}`}
+                      </span>
                       {terminada ? <span className="font-semibold text-marca">¡Pagada!</span> : (
                         <span>
-                          {d.cuota_centavos ? `Cuota ${formatear(d.cuota_centavos)}` : 'Sin cuota fija'}
-                          {proximo && ` · próximo pago ${fechaLarga(`${proximo.getFullYear()}-${String(proximo.getMonth() + 1).padStart(2, '0')}-${String(proximo.getDate()).padStart(2, '0')}`).toLowerCase()}`}
+                          {d.cuota_centavos ? `${d.tipo === 'tarjeta' ? 'Mínimo' : 'Cuota'} ${formatear(d.cuota_centavos)} ${textoFrecuencia(d)}` : 'Sin cuota fija'}
+                          {proximo && d.frecuencia !== 'diaria' && ` · próximo pago ${fechaLarga(`${proximo.getFullYear()}-${String(proximo.getMonth() + 1).padStart(2, '0')}-${String(proximo.getDate()).padStart(2, '0')}`).toLowerCase()}`}
                         </span>
                       )}
                     </div>
@@ -221,7 +251,7 @@ export default function Deudas() {
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm pt-1">
                       {!terminada && (
                         <button className="font-semibold text-marca cursor-pointer"
-                          onClick={() => setEdicion({ que: 'pago', deuda: d, sugerido: elegido.planEsteMes[d.id] ?? d.cuota_centavos })}>
+                          onClick={() => setEdicion({ que: 'pago', deuda: d, sugerido: d.frecuencia === 'mensual' ? elegido.planEsteMes[d.id] ?? d.cuota_centavos : Math.max(d.cuota_centavos, Math.round((elegido.planEsteMes[d.id] ?? 0) / PAGOS_POR_MES[d.frecuencia])) })}>
                           Registrar pago
                         </button>
                       )}
@@ -251,7 +281,7 @@ export default function Deudas() {
         abierto={edicion !== null}
         onCerrar={() => setEdicion(null)}
       >
-        {edicion?.que === 'deuda' && <FormDeuda deuda={edicion.deuda} onListo={() => { setEdicion(null); deudas.recargar() }} />}
+        {edicion?.que === 'deuda' && <FormDeuda deuda={edicion.deuda} cuentas={cuentas.datos ?? []} onListo={() => { setEdicion(null); deudas.recargar(); cuentas.recargar() }} />}
         {edicion?.que === 'pago' && (
           <FormPago deuda={edicion.deuda} cuentas={cuentas.datos ?? []} sugerido={edicion.sugerido} onListo={() => { setEdicion(null); deudas.recargar() }} />
         )}

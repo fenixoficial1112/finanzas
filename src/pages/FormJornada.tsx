@@ -29,7 +29,7 @@ export default function FormJornada({ jornada, plataformas, cuentas, categorias,
   prellenado: { km_final: number | null; cuenta_efectivo_id: string | null; cuenta_app_id: string | null } | null
   onListo: () => void
 }) {
-  const cuentasPesos = cuentas.filter((x) => x.moneda === 'DOP' && !x.archivada && x.tipo !== 'inversion')
+  const cuentasPesos = cuentas.filter((x) => x.moneda === 'DOP' && !x.archivada && x.tipo !== 'inversion' && x.tipo !== 'tarjeta')
   const efectivoPorDefecto =
     prellenado?.cuenta_efectivo_id ?? cuentasPesos.find((x) => x.tipo === 'efectivo')?.id ?? cuentasPesos[0]?.id ?? ''
   const appPorDefecto =

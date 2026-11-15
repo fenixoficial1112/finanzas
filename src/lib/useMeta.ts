@@ -2,6 +2,7 @@ import { listarDeudas, listarJornadas, listarMetas, listarObligaciones, obtenerT
 import { haceDias, hoyISO, mesActual, rangoMes } from './fechas'
 import { calcularMeta, progresoMes } from './meta'
 import { estadoMeta } from './metas'
+import { cuotaMensual } from './deudas'
 import { enPesos } from './dinero'
 import { useDatos } from './useDatos'
 
@@ -30,7 +31,7 @@ export async function cargarMeta() {
     .filter((x) => x.mensual > 0)
   const totalMes =
     obligaciones.filter((o) => o.activa).reduce((s, o) => s + o.monto_centavos, 0) +
-    cuotas.reduce((s, d) => s + d.cuota_centavos, 0) +
+    cuotas.reduce((s, d) => s + cuotaMensual(d.cuota_centavos, d.frecuencia), 0) +
     aportesMetas.reduce((s, m) => s + m.mensual, 0)
   const meta = calcularMeta(totalMes, prefs.dias_trabajo_semana, prefs.margen_pct, plataformas, { jornadas, porPlataforma })
   const netoMes = jornadasMes.reduce((s, j) => s + j.neto_centavos, 0)

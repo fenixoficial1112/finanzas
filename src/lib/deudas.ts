@@ -1,3 +1,5 @@
+import type { FrecuenciaPago } from './datos'
+
 // Simulador de pago de deudas mes a mes. Todos los montos en centavos.
 
 export type Estrategia = 'avalancha' | 'bola_nieve' | 'minimos'
@@ -104,4 +106,56 @@ export function proximoPago(diaPago: number, hoy = new Date()): Date {
   const base = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate())
   const esteMes = enMes(hoy.getFullYear(), hoy.getMonth())
   return esteMes >= base ? esteMes : enMes(hoy.getFullYear(), hoy.getMonth() + 1)
+}
+
+// ---------- Frecuencias de pago ----------
+
+/** Pagos por mes según la frecuencia (diaria: 30 días). */
+export const PAGOS_POR_MES: Record<FrecuenciaPago, number> = { mensual: 1, quincenal: 2, semanal: 52 / 12, diaria: 30 }
+
+/** Cuota mensual equivalente (centavos) de una deuda que se paga con cierta frecuencia. */
+export function cuotaMensual(cuota: number, frecuencia: FrecuenciaPago | undefined): number {
+  return Math.round(cuota * PAGOS_POR_MES[frecuencia ?? 'mensual'])
+}
+
+export type PeriodoTasa = 'anual' | 'mensual' | 'quincenal' | 'semanal' | 'diaria'
+const VECES_AL_ANIO: Record<PeriodoTasa, number> = { anual: 1, mensual: 12, quincenal: 24, semanal: 52, diaria: 365 }
+
+/** Convierte una tasa de cualquier periodo a tasa anual simple (%). */
+export const tasaAnual = (tasa: number, periodo: PeriodoTasa) => tasa * VECES_AL_ANIO[periodo]
+
+const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado']
+
+/** Próxima fecha de pago según la frecuencia (null si no hay datos suficientes). */
+export function proximoPagoDeuda(
+  d: { frecuencia?: FrecuenciaPago; dia_pago: number | null; dia_pago_2?: number | null; dia_semana?: number | null },
+  hoy = new Date(),
+): Date | null {
+  const base = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate())
+  switch (d.frecuencia ?? 'mensual') {
+    case 'diaria':
+      return base
+    case 'semanal': {
+      if (d.dia_semana == null) return null
+      const f = new Date(base)
+      f.setDate(f.getDate() + ((d.dia_semana - f.getDay() + 7) % 7))
+      return f
+    }
+    case 'quincenal': {
+      const fechas = [d.dia_pago, d.dia_pago_2].filter((x): x is number => x != null).map((dia) => proximoPago(dia, hoy))
+      return fechas.length ? new Date(Math.min(...fechas.map((f) => f.getTime()))) : null
+    }
+    default:
+      return d.dia_pago ? proximoPago(d.dia_pago, hoy) : null
+  }
+}
+
+/** "Cuota RD$1,800 quincenal (días 15 y 30)" → solo la parte de cuándo. */
+export function textoFrecuencia(d: { frecuencia?: FrecuenciaPago; dia_pago: number | null; dia_pago_2?: number | null; dia_semana?: number | null }): string {
+  switch (d.frecuencia ?? 'mensual') {
+    case 'diaria': return 'cada día'
+    case 'semanal': return d.dia_semana != null ? `cada ${DIAS_SEMANA[d.dia_semana]}` : 'cada semana'
+    case 'quincenal': return d.dia_pago && d.dia_pago_2 ? `los días ${d.dia_pago} y ${d.dia_pago_2}` : 'cada quincena'
+    default: return d.dia_pago ? `el día ${d.dia_pago}` : 'cada mes'
+  }
 }
