@@ -16,7 +16,7 @@ export function resumir(movs: Movimiento[], cuentas: CuentaConSaldo[], tasaUSD: 
   let gastos = 0
   let faltaTasa = false
   for (const m of movs) {
-    if (m.tipo === 'transferencia') continue
+    if (m.tipo === 'transferencia' || m.origen === 'inversion_ajuste') continue
     const mon = moneda.get(m.cuenta_id) ?? 'DOP'
     if (mon === 'USD' && !tasaUSD) {
       faltaTasa = true

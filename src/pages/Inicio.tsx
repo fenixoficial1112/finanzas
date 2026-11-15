@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { Aviso, btnPrincipal, tarjeta } from '../components/ui'
-import { NOMBRES_DOCUMENTO, listarCategorias, listarMetas, listarCuentas, listarDeudas, listarPresupuestos, obtenerUmbralAlerta, listarMovimientos, obtenerDatosVehiculo, obtenerTasaUSD } from '../lib/datos'
+import { NOMBRES_DOCUMENTO, listarCategorias, listarInversiones, listarMetas, listarCuentas, listarDeudas, listarPresupuestos, obtenerUmbralAlerta, listarMovimientos, obtenerDatosVehiculo, obtenerTasaUSD } from '../lib/datos'
 import { enPesos, formatear } from '../lib/dinero'
 import { fechaLarga, hoyISO, mesActual, nombreMes, rangoMes } from '../lib/fechas'
 import { resumir } from '../lib/resumen'
@@ -9,6 +9,7 @@ import { useMeta } from '../lib/useMeta'
 import { proximoPago } from '../lib/deudas'
 import { avance, gastoPorCategoria } from '../lib/presupuesto'
 import { estadoMeta, TEXTO_RITMO } from '../lib/metas'
+import { diasParaVencer } from '../lib/inversiones'
 import { COLORES_ESTADO, estadoDocumento, estadoRecordatorio } from '../lib/vehiculo'
 
 const PASOS = [
@@ -31,6 +32,7 @@ export default function Inicio() {
 
   const deudas = useDatos(listarDeudas, [])
   const metas = useDatos(listarMetas, [])
+  const inversiones = useDatos(listarInversiones, [])
   const presupuesto = useDatos(async () => {
     const [ps, cats, umbral] = await Promise.all([listarPresupuestos(mes), listarCategorias(), obtenerUmbralAlerta()])
     return { ps, cats, umbral }
@@ -77,7 +79,16 @@ export default function Inicio() {
           : `${nombres.get(x.categoria_id)}: llevas el ${Math.round(a.fraccion * 100)}% del presupuesto`,
       }))
   })()
-  const todasAlertas = [...alertasDeudas, ...alertasPresupuesto, ...alertas]
+  const alertasInversiones = (inversiones.datos ?? [])
+    .filter((i) => i.estado === 'activa')
+    .map((i) => ({ i, dias: diasParaVencer(i) }))
+    .filter(({ dias }) => dias != null && dias <= 15)
+    .map(({ i, dias }) => ({
+      clave: i.id,
+      estado: (dias! < 0 ? 'vencido' : 'pronto') as 'vencido' | 'pronto',
+      texto: dias! < 0 ? `${i.nombre}: venció, decide si renovar o retirar` : `${i.nombre}: vence en ${dias} días`,
+    }))
+  const todasAlertas = [...alertasDeudas, ...alertasPresupuesto, ...alertasInversiones, ...alertas]
 
   const lista = cuentas.datos ?? []
   const tasaUSD = tasa.datos ?? null

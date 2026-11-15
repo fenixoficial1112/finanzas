@@ -1,7 +1,7 @@
 // Arma el resumen de datos que se envía al asesor IA. Todas las cuentas se hacen aquí
 // (con la misma lógica que usan las pantallas) para que la IA solo tenga que explicarlas.
 import {
-  NOMBRES_DEUDA, NOMBRES_DOCUMENTO, NOMBRES_OBLIGACION, listarCategorias, listarCuentas, listarDeudas, listarJornadas,
+  NOMBRES_DEUDA, NOMBRES_INVERSION, NOMBRES_DOCUMENTO, NOMBRES_OBLIGACION, listarCategorias, listarCuentas, listarDeudas, listarInversiones, listarJornadas,
   listarMetas, listarMovimientos, listarPlataformas, listarPresupuestos, obtenerDatosVehiculo, obtenerUmbralAlerta, obtenerPlanDeudas, obtenerTasaUSD, totalesPorPlataforma,
   type CuentaConSaldo, type Movimiento,
 } from './datos'
@@ -11,6 +11,7 @@ import { diasDelMes, haceDias, hoyISO, mesActual, nombreMes, rangoMes } from './
 import { cargarMeta, DIAS_HISTORIAL } from './useMeta'
 import { avance, gastoPorCategoria } from './presupuesto'
 import { NOMBRES_PLAZO, estadoMeta } from './metas'
+import { interesMensualEstimado } from './inversiones'
 import { estadoDocumento, estadoRecordatorio, rendimiento } from './vehiculo'
 
 /** Centavos → pesos redondeados (lo que lee la IA). */
@@ -29,7 +30,7 @@ function resumenMes(movs: Movimiento[], cuentas: CuentaConSaldo[], tasa: number 
   let gastos = 0
   const porCategoria = new Map<string, number>()
   for (const m of movs) {
-    if (m.tipo === 'transferencia') continue
+    if (m.tipo === 'transferencia' || m.origen === 'inversion_ajuste') continue
     const mon = moneda.get(m.cuenta_id) ?? 'DOP'
     if (mon === 'USD' && !tasa) continue
     const pesos = enPesos(m.monto_centavos, mon, tasa ?? 0)
@@ -62,12 +63,12 @@ export async function construirContexto() {
   const anterior = mesAnterior(mes)
   const desde30 = haceDias(DIAS_HISTORIAL - 1)
 
-  const [cuentas, tasa, categorias, movsMes, movsAnterior, jornadas, porApp, plataformas, deudas, planDeudas, meta, vehiculo, presupuestos, umbral, metas] =
+  const [cuentas, tasa, categorias, movsMes, movsAnterior, jornadas, porApp, plataformas, deudas, planDeudas, meta, vehiculo, presupuestos, umbral, metas, inversiones] =
     await Promise.all([
       listarCuentas(), obtenerTasaUSD(), listarCategorias(),
       listarMovimientos(rangoMes(mes)), listarMovimientos(rangoMes(anterior)),
       listarJornadas(desde30, hoy), totalesPorPlataforma(desde30, hoy), listarPlataformas(),
-      listarDeudas(), obtenerPlanDeudas(), cargarMeta(), obtenerDatosVehiculo(), listarPresupuestos(mes), obtenerUmbralAlerta(), listarMetas(),
+      listarDeudas(), obtenerPlanDeudas(), cargarMeta(), obtenerDatosVehiculo(), listarPresupuestos(mes), obtenerUmbralAlerta(), listarMetas(), listarInversiones(),
     ])
   const nombresCat = new Map(categorias.map((c) => [c.id, c.nombre]))
 
@@ -102,7 +103,7 @@ export async function construirContexto() {
 
   return {
     fecha_hoy: hoy,
-    nota: 'Montos en pesos dominicanos (RD$) redondeados, salvo que se indique US$. Las inversiones todavía no se registran en la app.',
+    nota: 'Montos en pesos dominicanos (RD$) redondeados, salvo que se indique US$.',
     cuentas: {
       lista: cuentas.map((c) => ({ nombre: c.nombre, tipo: c.tipo, moneda: c.moneda === 'USD' ? 'US$' : 'RD$', saldo: rd(c.saldo_centavos) })),
       tasa_dolar: tasa,
@@ -171,6 +172,12 @@ export async function construirContexto() {
         fecha_objetivo: m.fecha_objetivo, ritmo: e.ritmo, aporte_mensual_necesario: rd(e.aporteMensual), incluida_en_meta_diaria: m.incluir_en_meta,
       }
     }),
+    inversiones: inversiones.length === 0 ? 'No ha registrado inversiones' : inversiones.filter((i) => i.estado === 'activa').map((i) => ({
+      nombre: i.nombre, tipo: NOMBRES_INVERSION[i.tipo], entidad: i.entidad, moneda: i.moneda === 'USD' ? 'US$' : 'RD$',
+      valor_actual: rd(i.valor_centavos), aportado: rd(i.aportado_centavos), ganancia: rd(i.ganancia_centavos),
+      tasa_anual_pct: i.tasa_anual, rendimiento_mensual_estimado: (() => { const x = interesMensualEstimado(i); return x == null ? null : rd(x) })(),
+      vence: i.fecha_vencimiento,
+    })),
     deudas: activas.length === 0 ? { activas: 0 } : {
       total: rd(activas.reduce((s, d) => s + d.saldo_centavos, 0)),
       intereses_este_mes: rd(activas.reduce((s, d) => s + interesMensual(d.saldo_centavos, d.tasa_anual), 0)),

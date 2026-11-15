@@ -39,9 +39,11 @@ export interface Movimiento {
   mantenimiento_id?: string | null
   pago_deuda_id?: string | null
   aporte_meta_id?: string | null
+  inversion_id?: string | null
+  origen?: string | null
 }
 
-export type NuevoMovimiento = Omit<Movimiento, 'id' | 'jornada_id' | 'carga_id' | 'mantenimiento_id' | 'pago_deuda_id' | 'aporte_meta_id'>
+export type NuevoMovimiento = Omit<Movimiento, 'id' | 'jornada_id' | 'carga_id' | 'mantenimiento_id' | 'pago_deuda_id' | 'aporte_meta_id' | 'inversion_id' | 'origen'>
 
 export const NOMBRES_TIPO_CUENTA: Record<TipoCuenta, string> = {
   efectivo: 'Efectivo',
@@ -110,7 +112,7 @@ export interface FiltroMovimientos {
 export async function listarMovimientos(f: FiltroMovimientos): Promise<Movimiento[]> {
   let q = supabase
     .from('movimientos')
-    .select('id,tipo,monto_centavos,cuenta_id,cuenta_destino_id,monto_destino_centavos,categoria_id,fecha,nota,jornada_id,carga_id,mantenimiento_id,pago_deuda_id,aporte_meta_id')
+    .select('id,tipo,monto_centavos,cuenta_id,cuenta_destino_id,monto_destino_centavos,categoria_id,fecha,nota,jornada_id,carga_id,mantenimiento_id,pago_deuda_id,aporte_meta_id,inversion_id,origen')
     .gte('fecha', f.desde)
     .lte('fecha', f.hasta)
     .order('fecha', { ascending: false })
@@ -777,4 +779,157 @@ export async function guardarAporte(a: Omit<AporteMeta, 'id'>) {
 
 export async function borrarAporte(id: string) {
   revisar(await supabase.from('aportes_meta').delete().eq('id', id))
+}
+
+// ---------- Inversiones ----------
+export type TipoInversion = 'certificado' | 'ahorro' | 'fondo' | 'bonos' | 'cooperativa' | 'acciones' | 'otra'
+export const NOMBRES_INVERSION: Record<TipoInversion, string> = {
+  certificado: 'Certificado financiero',
+  ahorro: 'Cuenta de ahorro',
+  fondo: 'Fondo de inversión',
+  bonos: 'Bonos',
+  cooperativa: 'Cooperativa',
+  acciones: 'Acciones / ETF',
+  otra: 'Otra',
+}
+
+export interface Inversion {
+  id: string
+  nombre: string
+  tipo: TipoInversion
+  entidad: string | null
+  moneda: Moneda
+  cuenta_id: string
+  tasa_anual: number | null
+  fecha_inicio: string
+  fecha_vencimiento: string | null
+  estado: 'activa' | 'cerrada'
+  nota: string | null
+}
+
+export interface InversionConValor extends Inversion {
+  /** Valor actual (saldo de su cuenta). */
+  valor_centavos: number
+  /** Dinero puesto menos dinero retirado. */
+  aportado_centavos: number
+  /** Rendimientos cobrados (dentro o fuera de la inversión). */
+  rendimientos_centavos: number
+  /** Ganancia total = valor − aportado + rendimientos cobrados fuera. */
+  ganancia_centavos: number
+  movimientos: Movimiento[]
+}
+
+const COLUMNAS_MOV = 'id,tipo,monto_centavos,cuenta_id,cuenta_destino_id,monto_destino_centavos,categoria_id,fecha,nota,inversion_id,origen'
+
+export async function listarInversiones(): Promise<InversionConValor[]> {
+  const invs = (revisar(
+    await supabase.from('inversiones')
+      .select('id,nombre,tipo,entidad,moneda,cuenta_id,tasa_anual,fecha_inicio,fecha_vencimiento,estado,nota')
+      .order('fecha_inicio'),
+  ) as Inversion[]).map((i) => ({ ...i, tasa_anual: i.tasa_anual == null ? null : Number(i.tasa_anual) }))
+  if (invs.length === 0) return []
+  const ids = invs.map((i) => i.cuenta_id)
+  const [cuentas, movs] = await Promise.all([
+    listarCuentas(true),
+    supabase.from('movimientos').select(COLUMNAS_MOV)
+      .or(`cuenta_id.in.(${ids.join(',')}),cuenta_destino_id.in.(${ids.join(',')}),inversion_id.in.(${invs.map((i) => i.id).join(',')})`)
+      .order('fecha', { ascending: false }),
+  ])
+  const lista = (revisar(movs) as Movimiento[]).map((m) => ({ ...m, monto_centavos: Number(m.monto_centavos) }))
+  return invs.map((inv) => {
+    const cuenta = cuentas.find((c) => c.id === inv.cuenta_id)
+    const propios = lista.filter((m) => m.cuenta_id === inv.cuenta_id || m.cuenta_destino_id === inv.cuenta_id || m.inversion_id === inv.id)
+    let aportado = cuenta?.saldo_inicial_centavos ?? 0
+    let rendimientos = 0
+    let rendimientosFuera = 0
+    for (const m of propios) {
+      if (m.tipo === 'transferencia' && m.cuenta_destino_id === inv.cuenta_id) aportado += m.monto_centavos
+      else if (m.tipo === 'transferencia' && m.cuenta_id === inv.cuenta_id) aportado -= m.monto_centavos
+      else if (m.origen === 'inversion_rendimiento') {
+        rendimientos += m.monto_centavos
+        if (m.cuenta_id !== inv.cuenta_id) rendimientosFuera += m.monto_centavos
+      }
+    }
+    const valor = cuenta?.saldo_centavos ?? 0
+    return {
+      ...inv,
+      valor_centavos: valor,
+      aportado_centavos: aportado,
+      rendimientos_centavos: rendimientos,
+      ganancia_centavos: valor - aportado + rendimientosFuera,
+      movimientos: propios,
+    }
+  })
+}
+
+export interface NuevaInversion {
+  nombre: string
+  tipo: TipoInversion
+  entidad: string | null
+  moneda: Moneda
+  tasa_anual: number | null
+  fecha_inicio: string
+  fecha_vencimiento: string | null
+  nota: string | null
+  monto_centavos: number
+  /** Cuenta de donde sale el dinero; null si ya estaba invertido antes de usar la app. */
+  cuenta_origen_id: string | null
+}
+
+export async function crearInversion(p: NuevaInversion): Promise<string> {
+  return revisar(await supabase.rpc('crear_inversion', { p })) as string
+}
+
+export async function actualizarInversion(id: string, cambios: Partial<Pick<Inversion, 'nombre' | 'entidad' | 'tasa_anual' | 'fecha_vencimiento' | 'nota'>>) {
+  revisar(await supabase.from('inversiones').update(cambios).eq('id', id))
+}
+
+/** Cierra la inversión y archiva su cuenta (el historial se conserva). */
+export async function cerrarInversion(inv: Inversion, cerrar = true) {
+  revisar(await supabase.from('inversiones').update({ estado: cerrar ? 'cerrada' : 'activa' }).eq('id', inv.id))
+  await archivarCuenta(inv.cuenta_id, cerrar)
+}
+
+async function categoriaId(nombre: string, tipo: 'ingreso' | 'gasto'): Promise<string> {
+  const existente = revisar(
+    await supabase.from('categorias').select('id').eq('tipo', tipo).eq('nombre', nombre).maybeSingle(),
+  ) as { id: string } | null
+  if (existente) return existente.id
+  const nueva = revisar(await supabase.from('categorias').insert({ nombre, tipo }).select('id').single()) as { id: string }
+  return nueva.id
+}
+
+export type OperacionInversion =
+  | { tipo: 'depositar'; cuenta_id: string; monto_centavos: number; fecha: string; nota?: string | null }
+  | { tipo: 'retirar'; cuenta_id: string; monto_centavos: number; fecha: string; nota?: string | null }
+  | { tipo: 'rendimiento'; cuenta_id: string; monto_centavos: number; fecha: string; nota?: string | null }
+  | { tipo: 'valor'; valor_centavos: number; fecha: string; nota?: string | null }
+
+export async function operarInversion(inv: InversionConValor, op: OperacionInversion) {
+  const base = { fecha: op.fecha, nota: op.nota || null }
+  let fila: Record<string, unknown>
+  if (op.tipo === 'depositar' || op.tipo === 'retirar') {
+    const desde = op.tipo === 'depositar' ? op.cuenta_id : inv.cuenta_id
+    const hacia = op.tipo === 'depositar' ? inv.cuenta_id : op.cuenta_id
+    fila = {
+      ...base, tipo: 'transferencia', monto_centavos: op.monto_centavos, cuenta_id: desde, cuenta_destino_id: hacia,
+      nota: base.nota ?? `${op.tipo === 'depositar' ? 'Depósito a' : 'Retiro de'} ${inv.nombre}`,
+    }
+  } else if (op.tipo === 'rendimiento') {
+    fila = {
+      ...base, tipo: 'ingreso', monto_centavos: op.monto_centavos, cuenta_id: op.cuenta_id,
+      categoria_id: await categoriaId('Rendimientos de inversiones', 'ingreso'),
+      origen: 'inversion_rendimiento', inversion_id: inv.id, nota: base.nota ?? `Rendimiento ${inv.nombre}`,
+    }
+  } else {
+    const diferencia = op.valor_centavos - inv.valor_centavos
+    if (diferencia === 0) return
+    const sube = diferencia > 0
+    fila = {
+      ...base, tipo: sube ? 'ingreso' : 'gasto', monto_centavos: Math.abs(diferencia), cuenta_id: inv.cuenta_id,
+      categoria_id: await categoriaId(sube ? 'Rendimientos de inversiones' : 'Pérdida en inversiones', sube ? 'ingreso' : 'gasto'),
+      origen: 'inversion_ajuste', inversion_id: inv.id, nota: base.nota ?? `Actualización de valor de ${inv.nombre}`,
+    }
+  }
+  revisar(await supabase.from('movimientos').insert(fila))
 }

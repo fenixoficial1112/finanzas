@@ -9,7 +9,7 @@ export function gastoPorCategoria(movs: Movimiento[], cuentas: CuentaConSaldo[],
   const mapa = new Map<string, number>()
   let sinCategoria = 0
   for (const m of movs) {
-    if (m.tipo !== 'gasto') continue
+    if (m.tipo !== 'gasto' || m.origen === 'inversion_ajuste') continue
     const mon = moneda.get(m.cuenta_id) ?? 'DOP'
     if (mon === 'USD' && !tasaUSD) continue
     const pesos = enPesos(m.monto_centavos, mon, tasaUSD ?? 0)
