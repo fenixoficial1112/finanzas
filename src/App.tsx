@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, HashRouter, Route, Routes } from 'react-router-dom'
 import { useAuth } from './auth/AuthProvider'
 import AppLayout from './layout/AppLayout'
 import { supabaseConfigurado } from './lib/supabase'
@@ -20,6 +20,9 @@ import Proximamente from './pages/Proximamente'
 import Reportes from './pages/Reportes'
 import Vehiculo from './pages/Vehiculo'
 
+// En el programa de escritorio la app se abre desde un archivo local: las rutas van después de "#".
+const Router = window.location.protocol === 'file:' ? HashRouter : BrowserRouter
+
 export default function App() {
   if (!supabaseConfigurado) return <ConfigFaltante />
   return <Rutas />
@@ -35,7 +38,7 @@ function Rutas() {
   if (!session) return <Login />
 
   return (
-    <BrowserRouter>
+    <Router>
       <Routes>
         <Route element={<AppLayout />}>
           <Route index element={<Inicio />} />
@@ -54,6 +57,6 @@ function Rutas() {
           <Route path="*" element={<Proximamente titulo="Página no encontrada" fase={0} />} />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </Router>
   )
 }

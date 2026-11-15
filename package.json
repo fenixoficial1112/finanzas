@@ -1,13 +1,16 @@
 {
   "name": "fenix-app",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "escritorio": "vite build --mode escritorio && electron .",
+    "build:escritorio": "vite build --mode escritorio",
+    "dist:win": "vite build --mode escritorio && electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",
@@ -21,10 +24,58 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^45.3.2",
+    "electron-builder": "^26.18.0",
     "oxlint": "^1.90.0",
     "tailwindcss": "^4.3.5",
     "typescript": "~7.0.2",
     "vite": "^8.3.6",
     "vite-plugin-pwa": "^2.0.0"
+  },
+  "productName": "FENIX APP",
+  "description": "Finanzas personales para conductores de InDrive y Uber",
+  "author": "FENIX APP",
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "com.fenixapp.finanzas",
+    "productName": "FENIX APP",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "protocols": [
+      {
+        "name": "FENIX APP",
+        "schemes": [
+          "fenixapp"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "FENIX-APP-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "FENIX APP",
+      "language": "3082"
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "icon": "build/icon.png"
+    }
   }
 }

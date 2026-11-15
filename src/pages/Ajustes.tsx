@@ -5,6 +5,7 @@ import {
   obtenerTasaUSD, type Categoria, type Plataforma,
 } from '../lib/datos'
 import { useDatos } from '../lib/useDatos'
+import { infoConexion, olvidarConfigSupabase } from '../lib/supabase'
 
 export default function Ajustes() {
   return (
@@ -13,6 +14,7 @@ export default function Ajustes() {
       <TasaDolar />
       <Plataformas />
       <Categorias />
+      <Conexion />
     </div>
   )
 }
@@ -202,5 +204,25 @@ function FilaPlataforma({ p, onGuardar }: { p: Plataforma; onGuardar: (c: Partia
         {p.activa ? 'Ocultar' : 'Mostrar'}
       </button>
     </li>
+  )
+}
+
+function Conexion() {
+  const { url, cambiable } = infoConexion()
+  return (
+    <section className={`${tarjeta} p-6 space-y-3`}>
+      <h2 className="text-lg font-semibold">Conexión con la nube</h2>
+      <p className="text-sm text-suave">Tus datos se guardan en tu proyecto de Supabase: <b className="text-tinta break-all">{url}</b></p>
+      {cambiable && (
+        <button
+          className="text-sm font-semibold text-peligro cursor-pointer"
+          onClick={() => {
+            if (confirm('¿Conectar la app a otro proyecto de Supabase? Se cerrará tu sesión; tus datos siguen guardados en el proyecto actual.')) olvidarConfigSupabase()
+          }}
+        >
+          Cambiar de proyecto
+        </button>
+      )}
+    </section>
   )
 }

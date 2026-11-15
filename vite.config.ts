@@ -3,12 +3,14 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  // Para el programa de escritorio la app se abre como archivo local: rutas relativas y sin service worker.
+  base: mode === 'escritorio' ? './' : '/',
   plugins: [
     react(),
     tailwindcss(),
     // Hace que FENIX APP se pueda instalar en la PC (Chrome/Edge → "Instalar FENIX APP").
-    VitePWA({
+    mode !== 'escritorio' && VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
@@ -32,4 +34,4 @@ export default defineConfig({
       },
     }),
   ],
-})
+}))

@@ -1,30 +1,68 @@
 # FENIX APP
 
-App web de finanzas personales para conductores de InDrive y Uber en República Dominicana:
+Aplicación de escritorio (Windows) y web de finanzas personales para conductores de InDrive y Uber en República Dominicana:
 ingresos y gastos diarios, jornadas, vehículo, presupuesto, deudas, metas, inversiones en
 RD$ y US$, y un asesor con IA.
 
-Tecnología: React + Vite + TypeScript, Tailwind CSS y Supabase (login y base de datos).
+Tecnología: React + Vite + TypeScript, Tailwind CSS, Electron (programa de Windows) y Supabase (login con correo o Google y base de datos en la nube).
 
-## Cómo ponerla a funcionar en tu computadora
+## 1. Instalar FENIX APP en Windows
 
-1. Instala **Node.js 20 o superior** desde nodejs.org.
-2. Crea un proyecto gratis en **supabase.com**.
-3. En Supabase, abre **SQL Editor** y ejecuta, **en orden**, cada archivo de
-   `supabase/migrations/` (`001_esquema_inicial.sql`, luego `002_saldos.sql`, `003_jornadas.sql`, `004_vehiculo.sql`, `005_meta_diaria.sql`, `006_deudas.sql`, `007_asesor_ia.sql`, `008_presupuesto.sql`, `009_metas.sql`, `010_inversiones.sql`, `011_tarjetas_y_frecuencias.sql`, …).
-   Cuando lleguen fases nuevas, ejecuta solo los archivos nuevos.
-4. En Supabase, ve a **Authentication → URL Configuration** y pon `http://localhost:5173`
-   como *Site URL* (para que los enlaces del correo te devuelvan a la app).
-5. Copia `.env.example` como `.env.local` y pega la URL y la clave *anon* de tu proyecto
-   (**Project Settings → API**).
-6. En una terminal, dentro de esta carpeta:
+1. En GitHub, entra a la pestaña **Actions** de este repositorio → la ejecución más reciente de
+   **"App de escritorio (Windows)"** con ✅ → abajo, en **Artifacts**, descarga **FENIX-APP-Windows**.
+   (Si hay una versión publicada en **Releases**, también puedes descargarla de ahí.)
+2. Descomprime y abre **FENIX-APP-Setup-1.0.0.exe**.
+3. Windows puede mostrar *"Windows protegió su PC"* porque el instalador no está firmado:
+   haz clic en **Más información → Ejecutar de todas formas**.
+4. Al terminar tendrás **FENIX APP** en el escritorio y en el menú Inicio.
 
-   ```bash
-   npm install
-   npm run dev
-   ```
+La primera vez, la app te pide conectar tu nube (paso 2).
 
-7. Abre http://localhost:5173 y crea tu cuenta.
+## 2. Preparar tu nube gratis (Supabase)
+
+Tus datos se guardan en **tu propio proyecto de Supabase**, en el plan gratuito
+(500 MB de base de datos, inicio de sesión incluido). Si el proyecto pasa una semana sin uso,
+Supabase lo pausa: se reactiva con un clic en su panel.
+
+1. Crea una cuenta y un proyecto en **supabase.com** (elige la región más cercana, por ejemplo *East US*).
+2. Abre **SQL Editor** y ejecuta, **en orden**, cada archivo de `supabase/migrations/`
+   (`001_esquema_inicial.sql`, `002_saldos.sql`, … hasta el número más alto).
+   Cuando lleguen actualizaciones, ejecuta solo los archivos nuevos.
+3. En **Authentication → URL Configuration**, agrega en **Redirect URLs**:
+   - `fenixapp://auth` (para la app de Windows)
+   - `http://localhost:5173` (solo si vas a probarla en modo desarrollo)
+4. En **Project Settings → API** copia la **Project URL** y la clave pública **anon**
+   (o *publishable*) y pégalas en FENIX APP la primera vez que la abras.
+   Nunca uses la clave secreta *service_role* en la app.
+
+## 3. Entrar con Gmail (Google)
+
+1. En **console.cloud.google.com**, crea un proyecto (gratis).
+2. Ve a **APIs y servicios → Pantalla de consentimiento de OAuth**, elige **Externo** y
+   completa el nombre (FENIX APP) y tu correo. Agrega tu Gmail como **usuario de prueba**.
+3. Ve a **Credenciales → Crear credenciales → ID de cliente de OAuth → Aplicación web**.
+   En **URI de redireccionamiento autorizados** pon la que te muestra Supabase en
+   **Authentication → Sign In / Providers → Google** (se ve así:
+   `https://TU-PROYECTO.supabase.co/auth/v1/callback`).
+4. Copia el **ID de cliente** y el **secreto de cliente** de Google y pégalos en ese mismo
+   proveedor de Google en Supabase. Activa el proveedor y guarda.
+5. En FENIX APP, toca **Continuar con Google**: se abre tu navegador, eliges tu Gmail y el
+   navegador te devuelve a la app ya conectado.
+
+## Modo desarrollo (opcional)
+
+Para modificar la app necesitas **Node.js 20+**:
+
+```bash
+npm install
+```
+
+```bash
+npm run dev
+```
+
+Abre http://localhost:5173. Para probar la versión de escritorio: `npm run escritorio`.
+Para fabricar el instalador en una PC con Windows: `npm run dist:win` (queda en `release/`).
 
 ## Activar el asesor IA
 
@@ -66,7 +104,7 @@ Cada pregunta envía a Claude un resumen de tus números (no tu historial comple
 unos pocos centavos de dólar. El modelo usado es Claude Opus 5.5, con respaldo automático
 del servidor si una consulta es rechazada por los filtros de seguridad.
 
-## Instalarla como aplicación de PC
+## Alternativa: instalarla desde el navegador
 
 FENIX APP se puede instalar en Windows como una aplicación normal (con ícono en el
 escritorio y en el menú Inicio, en su propia ventana):
@@ -96,3 +134,4 @@ escritorio y en el menú Inicio, en su propia ventana):
 | 9 | Inversiones en RD$ y US$ | ✅ |
 | 10 | Reportes con gráficos | ✅ |
 | 11 | Tarjetas de crédito, pagos quincenales/semanales/diarios y préstamos callejeros | ✅ |
+| 12 | Programa de Windows (.exe) e inicio de sesión con Google | ✅ |
