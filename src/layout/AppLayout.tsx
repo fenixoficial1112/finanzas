@@ -1,4 +1,6 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { useEffect } from 'react'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { revisarAvisos } from '../lib/avisos'
 import { Logo } from './Logo'
 import { escritorio } from '../lib/escritorio'
 import { useActualizacion } from '../lib/useActualizacion'
@@ -9,6 +11,7 @@ const SECCIONES = [
   { ruta: '/movimientos', nombre: 'Movimientos' },
   { ruta: '/cuentas', nombre: 'Cuentas' },
   { ruta: '/recurrentes', nombre: 'Pagos recurrentes' },
+  { ruta: '/calendario', nombre: 'Calendario' },
   { ruta: '/jornadas', nombre: 'Jornadas InDrive / Uber' },
   { ruta: '/vehiculo', nombre: 'Vehículo' },
   { ruta: '/presupuesto', nombre: 'Presupuesto' },
@@ -25,9 +28,19 @@ const linkCls = ({ isActive }: { isActive: boolean }) =>
 
 export default function AppLayout() {
   const actualizacion = useActualizacion()
+  const navegar = useNavigate()
+  // Avisos de Windows: al abrir y luego cada hora. Tocar un aviso abre la pantalla indicada.
+  useEffect(() => {
+    if (!escritorio) return
+    const revisar = () => { revisarAvisos().catch(() => undefined) }
+    const primero = setTimeout(revisar, 3000)
+    const cadaHora = setInterval(revisar, 60 * 60 * 1000)
+    const quitar = escritorio.app.alNavegar((ruta) => navegar(ruta))
+    return () => { clearTimeout(primero); clearInterval(cadaHora); quitar() }
+  }, [navegar])
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
-      <nav aria-label="Menú principal" className="md:w-60 md:min-h-screen bg-tinta text-white p-4 flex flex-col gap-1 md:sticky md:top-0 md:h-screen">
+      <nav aria-label="Menú principal" className="md:w-60 md:min-h-screen bg-tinta text-white p-4 flex flex-col gap-1 md:sticky md:top-0 md:h-screen md:overflow-y-auto">
         <div className="px-2 pb-5 pt-1">
           <Logo claro />
         </div>

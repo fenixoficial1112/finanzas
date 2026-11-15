@@ -11,13 +11,15 @@ Tecnología: React + Vite + TypeScript, Tailwind CSS, Electron (programa de Wind
 
 ## Instalar en Windows
 
-1. En GitHub, entra a la pestaña **Actions** de este repositorio → la ejecución más reciente de
-   **"App de escritorio (Windows)"** con ✅ → abajo, en **Artifacts**, descarga **FENIX-APP-Windows**.
-   (Si hay una versión publicada en **Releases**, también puedes descargarla de ahí.)
-2. Descomprime y abre **FENIX-APP-Setup-1.0.0.exe**.
+1. En GitHub, entra a **Releases** de este repositorio y descarga el **FENIX-APP-Setup-X.Y.Z.exe**
+   más reciente. (También está en **Actions** → la ejecución más reciente con ✅ → **Artifacts**.)
+2. Ábrelo.
 3. Windows puede mostrar *"Windows protegió su PC"* porque el instalador no está firmado:
    haz clic en **Más información → Ejecutar de todas formas**.
 4. Al terminar tendrás **FENIX APP** en el escritorio y en el menú Inicio. Ábrelo y empieza.
+
+Desde la versión 1.1.0 el programa **se actualiza solo**: cuando hay una versión nueva en Releases
+la descarga y te ofrece reiniciar (también en **Ajustes → Programa**).
 
 ## Dónde quedan tus datos
 
@@ -27,6 +29,8 @@ Tecnología: React + Vite + TypeScript, Tailwind CSS, Electron (programa de Wind
 - **Copia automática diaria** en la subcarpeta `respaldos` (se guardan las últimas 30).
 - **Ajustes → Tus datos → Guardar una copia de seguridad…** para guardar una copia donde quieras
   (un USB, Google Drive…). Si cambias de PC, instala FENIX APP y usa **Restaurar desde una copia…**.
+- **Copia automática en la nube**: en **Ajustes → Copia automática en Google Drive u OneDrive** elige
+  la carpeta de Google Drive u OneDrive y FENIX APP deja ahí `FENIX-APP-copia.db` al día.
 - Desinstalar el programa **no** borra tus datos.
 
 ## Asesor IA (opcional)
@@ -58,7 +62,7 @@ npm run escritorio
 Eso compila la app y abre el programa. `npm run dev` la abre en el navegador (los datos quedan
 en el navegador y el asesor no funciona ahí). Para fabricar el instalador en una PC con Windows:
 `npm run dist:win` (queda en `release/`). La estructura de la base de datos está en
-`src/lib/bd/esquema.sql`.
+`src/lib/bd/esquema.sql` y sus cambios posteriores en `esquema2.sql`, `esquema3.sql`…
 
 ## Fases
 
@@ -78,3 +82,7 @@ en el navegador y el asesor no funciona ahí). Para fabricar el instalador en un
 | 11 | Tarjetas de crédito, pagos quincenales/semanales/diarios y préstamos callejeros | ✅ |
 | 12 | Programa de Windows (.exe) | ✅ |
 | 13 | Datos guardados en el disco duro (SQLite), sin nube ni cuentas | ✅ |
+| 14 | Actualizaciones automáticas | ✅ |
+| 15 | Pagos recurrentes, calendario y avisos de Windows | ✅ |
+| 16 | Préstamos: interés y capital de cada pago, tabla de pagos | ✅ |
+| 17 | Copia automática en Google Drive / OneDrive | ✅ |

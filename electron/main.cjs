@@ -6,6 +6,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const asesor = require('./asesor.cjs')
 const actualizador = require('./actualizador.cjs')
+const extras = require('./extras.cjs')
 
 const MAX_RESPALDOS = 30
 let ventana = null
@@ -27,6 +28,9 @@ if (!app.requestSingleInstanceLock()) {
     if (ventana.isMinimized()) ventana.restore()
     ventana.focus()
   })
+  // Necesario en Windows para que los avisos salgan con el nombre del programa.
+  app.setAppUserModelId('com.fenixapp.finanzas')
+  extras.iniciar({ archivoDatos, ventana: () => ventana, ventanaPadre: () => ventana })
   app.whenReady().then(() => {
     crearVentana()
     actualizador.iniciar(() => ventana)
@@ -53,7 +57,9 @@ function crearVentana() {
       sandbox: true,
     },
   })
-  ventana.once('ready-to-show', () => ventana.show())
+  // Si se abrió solo al encender la PC, queda minimizado en la barra de tareas.
+  const minimizado = process.argv.includes('--minimizado')
+  ventana.once('ready-to-show', () => (minimizado ? ventana.minimize() : ventana.show()))
   ventana.on('closed', () => { ventana = null })
 
   // Enlaces externos se abren en el navegador, nunca dentro de la app.
@@ -103,6 +109,7 @@ ipcMain.handle('bd:guardar', (_evento, datos) => {
   fs.mkdirSync(carpetaDatos(), { recursive: true })
   respaldoDiario()
   escribirSeguro(archivoDatos(), aBytes(datos))
+  extras.alGuardar(archivoDatos())
 })
 
 ipcMain.handle('bd:ubicacion', () => ({

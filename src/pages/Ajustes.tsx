@@ -8,6 +8,7 @@ import { useDatos } from '../lib/useDatos'
 import { esperarGuardado, exportarBytes, restaurarBytes } from '../lib/bd'
 import { escritorio } from '../lib/escritorio'
 import { useActualizacion } from '../lib/useActualizacion'
+import { avisosActivos, ponerAvisosActivos } from '../lib/avisos'
 
 export default function Ajustes() {
   return (
@@ -18,6 +19,8 @@ export default function Ajustes() {
       <Categorias />
       <AsesorIA />
       <TusDatos />
+      {escritorio && <CopiaNube />}
+      {escritorio && <AvisosInicio />}
       <Programa />
     </div>
   )
@@ -269,9 +272,6 @@ function TusDatos() {
         {escritorio && <button className={btnSecundario} onClick={restaurar}>Restaurar desde una copia…</button>}
         {escritorio && <button className={btnSecundario} onClick={() => escritorio!.bd.abrirCarpeta()}>Abrir la carpeta de datos</button>}
       </div>
-      <p className="text-xs text-suave">
-        Consejo: guarda una copia de vez en cuando en un USB o en tu Google Drive. Si la PC se daña o la cambias, con esa copia recuperas todo.
-      </p>
       {msg && <Aviso tipo={msg.tipo}>{msg.texto}</Aviso>}
     </section>
   )
@@ -355,6 +355,71 @@ function Programa() {
           </button>
         )}
       </div>
+    </section>
+  )
+}
+
+function CopiaNube() {
+  const estado = useDatos(() => escritorio!.copia.estado(), [])
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null)
+  const hacer = async (fn: () => Promise<unknown>, ok?: string) => {
+    setMsg(null)
+    try { await fn(); if (ok) setMsg({ tipo: 'ok', texto: ok }) } catch (e) { setMsg({ tipo: 'error', texto: e instanceof Error ? e.message : String(e) }) }
+    estado.recargar()
+  }
+  const e = estado.datos
+  return (
+    <section className={`${tarjeta} p-6 space-y-4`}>
+      <div>
+        <h2 className="text-lg font-semibold">Copia automática en Google Drive u OneDrive</h2>
+        <p className="text-sm text-suave">
+          Si la PC se daña o te la roban, con esta copia recuperas todo. Elige una carpeta que se sincronice con la nube
+          (por ejemplo, la de Google Drive para escritorio u OneDrive) y FENIX APP dejará ahí una copia al día cada vez que hagas cambios
+          (como mucho cada 10 minutos) y al cerrar el programa.
+        </p>
+      </div>
+      {e?.carpeta ? (
+        <div className="rounded-xl bg-gray-50 border border-borde p-4 space-y-1 text-sm">
+          <p>Carpeta: <b className="break-all">{e.carpeta}</b></p>
+          <p className="text-suave">{e.ultima ? `Última copia: ${new Date(e.ultima).toLocaleString('es-DO', { dateStyle: 'long', timeStyle: 'short' })}` : 'Todavía no se ha hecho ninguna copia.'}</p>
+          {e.error && <p className="text-peligro">{e.error}</p>}
+        </div>
+      ) : (
+        <p className="text-sm rounded-lg bg-amber-50 text-amber-900 px-3 py-2">Todavía no has elegido carpeta: tus datos solo están en esta PC.</p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button className={btnPrincipal} onClick={() => hacer(async () => { const r = await escritorio!.copia.elegir(); if (!r) throw new Error('No elegiste ninguna carpeta.') }, 'Listo: copia hecha.')}>
+          {e?.carpeta ? 'Cambiar carpeta…' : 'Elegir carpeta…'}
+        </button>
+        {e?.carpeta && <button className={btnSecundario} onClick={() => hacer(() => escritorio!.copia.ahora(), 'Copia hecha.')}>Copiar ahora</button>}
+        {e?.carpeta && <button className={btnSecundario} onClick={() => hacer(() => escritorio!.copia.quitar())}>Dejar de copiar</button>}
+      </div>
+      <p className="text-xs text-suave">Para recuperar los datos en otra PC: instala FENIX APP y en “Tus datos” → “Restaurar desde una copia…” elige el archivo FENIX-APP-copia.db de esa carpeta.</p>
+      {msg && <Aviso tipo={msg.tipo}>{msg.texto}</Aviso>}
+    </section>
+  )
+}
+
+function AvisosInicio() {
+  const [avisos, setAvisos] = useState(avisosActivos)
+  const inicio = useDatos(() => escritorio!.app.inicioWindows(), [])
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <section className={`${tarjeta} p-6 space-y-4`}>
+      <h2 className="text-lg font-semibold">Avisos</h2>
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" className="w-4 h-4 mt-0.5" checked={avisos} onChange={(e) => { ponerAvisosActivos(e.target.checked); setAvisos(e.target.checked) }} />
+        <span><b>Avisarme en Windows</b> de las cuotas y pagos de hoy y mañana, lo pendiente por confirmar y los documentos del vehículo por vencer.</span>
+      </label>
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" className="w-4 h-4 mt-0.5" checked={inicio.datos ?? false} disabled={inicio.cargando}
+          onChange={async (e) => {
+            try { await escritorio!.app.ponerInicioWindows(e.target.checked); setError(null) } catch (err) { setError(err instanceof Error ? err.message : String(err)) }
+            inicio.recargar()
+          }} />
+        <span><b>Abrir FENIX APP al encender la PC</b> (minimizado), para que los avisos lleguen aunque no lo abras.</span>
+      </label>
+      {error && <Aviso>{error}</Aviso>}
     </section>
   )
 }

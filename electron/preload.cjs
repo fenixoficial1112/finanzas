@@ -26,11 +26,25 @@ contextBridge.exposeInMainWorld('fenix', {
     estadoActualizacion: () => invocar('app:estado-actualizacion'),
     buscarActualizacion: () => invocar('app:buscar-actualizacion'),
     instalarActualizacion: () => invocar('app:instalar-actualizacion'),
+    avisar: (aviso) => invocar('app:avisar', aviso),
+    inicioWindows: () => invocar('app:inicio-windows'),
+    ponerInicioWindows: (activo) => invocar('app:inicio-windows-poner', activo),
+    alNavegar: (callback) => {
+      const manejador = (_evento, ruta) => callback(ruta)
+      ipcRenderer.on('navegar', manejador)
+      return () => ipcRenderer.removeListener('navegar', manejador)
+    },
     alActualizar: (callback) => {
       const manejador = (_evento, estado) => callback(estado)
       ipcRenderer.on('actualizacion', manejador)
       return () => ipcRenderer.removeListener('actualizacion', manejador)
     },
+  },
+  copia: {
+    estado: () => invocar('copia:estado'),
+    elegir: () => invocar('copia:elegir'),
+    quitar: () => invocar('copia:quitar'),
+    ahora: () => invocar('copia:ahora'),
   },
   asesor: {
     estado: () => invocar('asesor:estado'),

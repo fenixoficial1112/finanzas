@@ -34,6 +34,18 @@ export interface PuenteEscritorio {
     buscarActualizacion: () => Promise<void>
     instalarActualizacion: () => Promise<void>
     alActualizar: (callback: (estado: EstadoActualizacion) => void) => () => void
+    /** Aviso de Windows; al tocarlo abre la app en `ruta`. */
+    avisar: (aviso: { titulo: string; cuerpo: string; ruta?: string }) => Promise<boolean>
+    alNavegar: (callback: (ruta: string) => void) => () => void
+    inicioWindows: () => Promise<boolean>
+    ponerInicioWindows: (activo: boolean) => Promise<boolean>
+  }
+  /** Copia automática en una carpeta de Google Drive, OneDrive o USB. */
+  copia: {
+    estado: () => Promise<{ carpeta: string | null; ultima: string | null; error: string | null }>
+    elegir: () => Promise<string | null>
+    quitar: () => Promise<void>
+    ahora: () => Promise<string | null>
   }
   asesor: {
     estado: () => Promise<{ tieneClave: boolean; cifrado: boolean }>
